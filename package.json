@@ -1,0 +1,33 @@
+{
+  "name": "tio",
+  "version": "0.0.1",
+  "description": "A ridiculously simple functional effects library for TypeScript",
+  "main": "index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "/dist"
+  ],
+  "scripts": {
+    "main": "tsc && node dist/index.js",
+    "test": "vitest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brkaisin/tio"
+  },
+  "keywords": [
+    "typescript",
+    "functional",
+    "effect",
+    "IO",
+    "error",
+    "handling"
+  ],
+  "author": "Brieuc Kaisin",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "vite": "^6.2.3",
+    "vitest": "^3.0.9"
+  }
+}

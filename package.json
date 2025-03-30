@@ -1,7 +1,7 @@
 {
   "name": "tio",
   "version": "0.0.1",
-  "description": "A ridiculously simple functional effects library for TypeScript",
+  "description": "A ridiculously simple, zero-dependency functional effect system for TypeScript",
   "main": "index.js",
   "types": "dist/index.d.ts",
   "files": [

@@ -42,24 +42,105 @@ to run.
 Here is a simple example of a TIO effect that is created from a `Promise` that can fail:
 
 ```typescript
-import { IO, TIO } from 'tio';
+import { TIO } from "tio/tio";
+import { IO } from "tio/aliases";
+import { Runtime } from "tio/runtime";
 
 const effect: IO<unknown, number> = TIO.fromPromise(() => Promise.resolve(42));
 
-const result: number = await effect.unsafeRun(); // 42
+// at this stage, the promise is not yet executed and can be composed with other effects
+
+const result: number = await Runtime.default.unsafeRun(effect); // 42
 ```
 
 Effects can also be directly created from values:
 
 ```typescript
-import { TIO, UIO } from 'tio';
+import { IO, UIO } from "tio/aliases";
+import { TIO } from "tio/tio";
+import { Runtime } from "tio/runtime";
+import { Exit } from "tio/util/exit";
 
 const effectSuccess: UIO<number> = TIO.succeed(42);
 const effectFailure: IO<string, never> = TIO.fail("error");
 
-const success: number = await effectSuccess.unsafeRun(); // 42
-const failure: never = await effectFailure.unsafeRun(); // throws an error
+const success: number = await Runtime.default.unsafeRun(effectSuccess); // 42
+const failureUnsafe: never = await Runtime.default.unsafeRun(effectFailure); // throws the error
+const failureSafe: Exit<string, never> = await Runtime.default.safeRunExit(effectFailure); // { error: "error" }
 ```
+
+Finally, here is a more complex example with dependencies and effect composition:
+
+```typescript
+import { TIO } from "tio/tio";
+import { URIO } from "tio/aliases";
+import { Runtime } from "tio/runtime";
+import { tag, Has, Tag } from "tio/tag";
+import { fold } from "tio/util/exit";
+
+type DbResult = { result: unknown }
+
+interface DB {
+    query(sql: string): Promise<DbResult>
+}
+
+interface Logger {
+    log(s: string): void
+}
+
+const LoggerTag: Tag<"Logger", Logger> = tag("Logger");
+const DBTag: Tag<"DB", DB> = tag("DB");
+
+const logger: Logger = {log: console.log};
+const db: DB = {
+    query(sql: string): Promise<DbResult> {
+        if (Math.random() > 0.2) {
+            // the DB crashes 80% of the time
+            return Promise.reject(`Query [${sql}] failed.`);
+        } else {
+            return Promise.resolve({result: `Query [${sql}] was executed successfully.`});
+        }
+    }
+};
+
+type HasLogger = Has<typeof LoggerTag>
+type HasDB = Has<typeof DBTag>
+
+function log(s: string): URIO<HasLogger, void> {
+    return TIO.make<HasLogger, never, void>((env) => env.Logger.log(s));
+}
+
+type DbError = string
+
+function queryDb(sql: string): TIO<HasDB, DbError, DbResult> {
+    return new TIO<HasDB, never, DbResult>((env) => env.DB.query(sql));
+}
+
+type Env = HasLogger & HasDB
+
+const queryDbAndLogResult: TIO<Env, DbError, void> =
+    queryDb("SELECT * FROM some_table")
+        .retry(2)
+        .map(JSON.stringify)
+        .flatMap(log)
+
+const runtime: Runtime<Env> = Runtime.default
+    .provideService(LoggerTag, logger)
+    .provideService(DBTag, db);
+
+runtime.safeRunExit(queryDbAndLogResult)
+    .then(result =>
+        fold(
+            result,
+            (error) => console.log(`Program encountered this error: ${error}`),
+            (value) => console.log(`Program exited successfully with ${value}`)
+        )
+    );
+```
+
+As you can see, **everything is pure** until the `Runtime` is used to run the effect.
+Feel free to run this program (`npm run main`) and see the output. You can also play with the code
+in [index.ts](src/index.ts).
 
 ## Testing
 
@@ -96,9 +177,9 @@ soon as possible. If you have any questions, feel free to open an issue.
 
 ## Todo
 
-- [] Fix todos
-- [] Fix tests (not all passing)
-- [] Write tests for runtime
-- [] rework tap and tapError to take TIO as arguments for purity
-- [] Check `fromPromise` to probably take `R` and remake `make` method (avoid direct usages of TIO constructor)
-- Configure prettier/hook to format code
+- [ ] Fix todos
+- [ ] Fix tests (not all passing)
+- [ ] Write tests for runtime
+- [ ] rework tap and tapError to take TIO as arguments for purity
+- [ ] Check `fromPromise` to probably take `R` and remake `make` method (avoid direct usages of TIO constructor)
+- [ ] Configure prettier/hook to format code

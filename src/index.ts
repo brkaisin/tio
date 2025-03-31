@@ -32,12 +32,6 @@ const db: DB = {
 type HasLogger = Has<typeof LoggerTag>
 type HasDB = Has<typeof DBTag>
 
-type Env = HasLogger & HasDB
-
-const runtime: Runtime<Env> = Runtime.default
-    .provideService(LoggerTag, logger)
-    .provideService(DBTag, db);
-
 function log(s: string): URIO<HasLogger, void> {
     return TIO.make<HasLogger, never, void>((env) => env.Logger.log(s));
 }
@@ -48,12 +42,18 @@ function queryDb(sql: string): TIO<HasDB, DbError, DbResult> {
     return new TIO<HasDB, never, DbResult>((env) => env.DB.query(sql));
 }
 
+type Env = HasLogger & HasDB
+
 // todo: add logging with tap and tapError when they become pure
-const queryDbAndLogResult: TIO<HasDB & HasLogger, DbError, void> =
+const queryDbAndLogResult: TIO<Env, DbError, void> =
     queryDb("SELECT * FROM some_table")
         .retry(2)
         .map(JSON.stringify)
         .flatMap(log)
+
+const runtime: Runtime<Env> = Runtime.default
+    .provideService(LoggerTag, logger)
+    .provideService(DBTag, db);
 
 runtime.safeRunExit(queryDbAndLogResult)
     .then(result =>

@@ -102,11 +102,6 @@ describe("TIO", () => {
         assert.deepEqual(await runtime.safeRunEither(TIO.succeed(left("error")).absolve(_)), left("error"));
     });
 
-    // it("catchAll", async () => {
-    //     assert.equal(await runtime.unsafeRun((TIO.succeed(1) as IO<unknown, 1>).catchAll((_) => TIO.succeed(2), _)), 1);
-    //     assert.equal(await runtime.unsafeRun((TIO.fail(1)).catchAll((_) => TIO.succeed(2), _)), 2);
-    // });
-
     it("zip", async () => {
         assert.deepEqual(await runtime.unsafeRun(TIO.succeed(1).zip(TIO.succeed(2))), [1, 2]);
     });

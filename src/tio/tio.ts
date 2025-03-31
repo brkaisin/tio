@@ -84,11 +84,6 @@ export class TIO<in R, out E, out A> {
         return this.flatMap(a => TIO.fromEither(subType(a, ev)));
     }
 
-    //   final def catchAll[R1 <: R, E2, A1 >: A](h: E => ZIO[R1, E2, A1])(implicit ev: CanFail[E]): ZIO[R1, E2, A1] =
-    // catchAll<R1, E2, A1>(h: (e: E) => TIO<R1, E2, A1>, ev: CanFail<E>): TIO<R1, E2, A | A1> {
-    //     return this.foldM<R1, A | A1, E2>(h, TIO.succeed);
-    // }
-
     zip<R1, B>(that: TIO<R1, E, B>): TIO<R & R1, E, [A, B]> {
         return new TIO<R & R1, E, [A, B]>((r) => Promise.all([this.run(r), that.run(r)]));
     }

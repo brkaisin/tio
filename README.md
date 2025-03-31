@@ -166,9 +166,8 @@ npm test
 This project is licensed under the MIT license. You can find the full text of the license in the [LICENSE](LICENSE.txt)
 file.
 
-This project was inspired by [ZIO](https://zio.dev/), a powerful functional effect library for Scala. While no code was
-directly copied, the concepts and design patterns influenced this work. If, in the future, the resemblance becomes too
-important, conditions of the Apache 2.0 license will be applied.
+This project was inspired by [ZIO](https://zio.dev/), a powerful functional effect library for Scala. If, in the future,
+the resemblance becomes too important, conditions of the Apache 2.0 license will be applied.
 
 ## Contributing
 

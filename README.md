@@ -32,7 +32,7 @@ are eager and do not feature a typed error channel. TIO addresses all of these p
 
 TIO is a pure data structure (an Algebraic Data Type) that describes effectful computations without executing them.
 Each TIO operation (like `map`, `flatMap`, `race`, etc.) builds up a tree of operations. The actual execution
-is handled by the `Runtime`, which interprets this tree using Promises.
+is handled by the `Runtime`, which interprets this tree.
 
 This separation of description and execution means:
 - TIO is truly lazy and referentially transparent
@@ -190,7 +190,5 @@ soon as possible. If you have any questions, feel free to open an issue.
 
 ## Todo
 
-- [ ] Fix todos
 - [ ] Write tests for runtime
-- [ ] Check `fromPromise` to probably take `R` and remake `make` method (avoid direct usages of TIO constructor)
 - [ ] Configure prettier/hook to format code

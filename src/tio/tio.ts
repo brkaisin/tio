@@ -100,6 +100,11 @@ export class TIO<in R, out E, out A> {
         return this.raceAll(that);
     }
 
+    // Note: Due to JavaScript's single-threaded nature, synchronous operations inside Promise
+    // executors cannot be truly "raced" - they run to completion before any other code executes.
+    // This race implementation works correctly for async operations (e.g., setTimeout, fetch),
+    // but synchronous CPU-bound tasks will complete in the order they are started.
+    // True parallelism for synchronous operations would require Worker Threads.
     raceAll<R1, E1, B>(...tios: Array<TIO<R1, E1, B>>): TIO<R & R1, E | E1, A | B> {
         return new TIO<R & R1, E | E1, A | B>((r) => Promise.race([this.run(r), ...tios.map(tio => tio.run(r))]));
     }

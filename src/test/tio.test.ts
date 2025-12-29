@@ -74,6 +74,32 @@ describe("TIO", () => {
         assert.equal(count, 1);
     });
 
+    it("tapError", async () => {
+        let error = "";
+        assert.equal(await runtime.safeRunUnion(TIO.fail("error").tapError(e => error = e)), "error");
+        assert.equal(error, "error");
+    });
+
+    it("tapBoth", async () => {
+        let value = 0;
+        let error = "";
+        assert.equal(await runtime.unsafeRun(TIO.succeed(1).tapBoth(x => value = x, e => error = e)), 1);
+        assert.equal(value, 1);
+        assert.equal(error, "");
+
+        value = 0;
+        error = "";
+        assert.equal(await runtime.safeRunUnion(TIO.fail("error").tapBoth(x => value = x, e => error = e)), "error");
+        assert.equal(value, 0);
+        assert.equal(error, "error");
+    });
+
+    it("orElse", async () => {
+        assert.equal(await runtime.unsafeRun(TIO.succeed(1).orElse(TIO.succeed(2))), 1);
+        assert.equal(await runtime.unsafeRun(TIO.fail("error").orElse(TIO.succeed(2))), 2);
+        assert.equal(await runtime.safeRunUnion(TIO.fail("error1").orElse(TIO.fail("error2"))), "error2");
+    });
+
     it("flip", async () => {
         assert.equal(await runtime.unsafeRun(TIO.fail("error").flip()), "error");
         assert.deepEqual(await runtime.safeRunEither(TIO.succeed(1).flip()), left(1));
@@ -99,6 +125,23 @@ describe("TIO", () => {
 
         // todo: the following test should also pass with unsafeRun, but runs infinitely...
         assert.deepEqual(await runtime.safeRunEither(TIO.succeed(left("error")).absolve()), left("error"));
+    });
+
+    it("augmentError", async () => {
+        const narrowError: TIO<void, "specific", number> = TIO.fail("specific");
+        const widenedError: TIO<void, string, number> = narrowError.augmentError<string>();
+        assert.equal(await runtime.safeRunUnion(widenedError), "specific");
+    });
+
+    it("make", async () => {
+        const tio = TIO.make((r: { value: number }) => r.value + 1);
+        const runtimeWithEnv: Runtime<{ value: number }> = new Runtime({ value: 41 });
+        assert.equal(await runtimeWithEnv.unsafeRun(tio), 42);
+    });
+
+    it("fromEither", async () => {
+        assert.equal(await runtime.unsafeRun(TIO.fromEither(right(1))), 1);
+        assert.deepEqual(await runtime.safeRunEither(TIO.fromEither(left("error"))), left("error"));
     });
 
     it("zip", async () => {

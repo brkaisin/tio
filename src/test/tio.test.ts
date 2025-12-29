@@ -152,8 +152,43 @@ describe("TIO", () => {
         assert.deepEqual(await runtime.unsafeRun(TIO.succeed(1).zip(TIO.succeed(2))), [1, 2]);
     });
 
+    it("zipLeft", async () => {
+        assert.equal(await runtime.unsafeRun(TIO.succeed(1).zipLeft(TIO.succeed(2))), 1);
+    });
+
+    it("zipRight", async () => {
+        assert.equal(await runtime.unsafeRun(TIO.succeed(1).zipRight(TIO.succeed(2))), 2);
+    });
+
     it("zipWith", async () => {
         assert.equal(await runtime.unsafeRun(TIO.succeed(1).zipWith(TIO.succeed(2), (x, y) => x + y)), 3);
+    });
+
+    it("as", async () => {
+        assert.equal(await runtime.unsafeRun(TIO.succeed(1).as("hello")), "hello");
+    });
+
+    it("unit", async () => {
+        assert.equal(await runtime.unsafeRun(TIO.succeed(1).unit()), undefined);
+    });
+
+    it("delay", async () => {
+        const start = Date.now();
+        await runtime.unsafeRun(TIO.succeed(1).delay(100));
+        const elapsed = Date.now() - start;
+        assert.isTrue(elapsed >= 90); // Allow some tolerance
+    });
+
+    it("ensuring", async () => {
+        let finalizerRan = false;
+        const successEffect = TIO.succeed(1).ensuring(TIO.succeed(finalizerRan = true));
+        assert.equal(await runtime.unsafeRun(successEffect), 1);
+        assert.isTrue(finalizerRan);
+
+        finalizerRan = false;
+        const failEffect = TIO.fail("error").ensuring(TIO.succeed(finalizerRan = true));
+        assert.equal(await runtime.safeRunUnion(failEffect), "error");
+        assert.isTrue(finalizerRan);
     });
 
     it("retry", async () => {
@@ -230,6 +265,24 @@ describe("TIO", () => {
         // completes before the timeout can fire, regardless of timeout duration.
         assert.equal(await runtime.safeRunUnion(p2.timeout(10)), 999999);
         assert.equal(await runtime.unsafeRun(p2.timeout(1500)), 999999);
+    });
+
+    it("all", async () => {
+        const p1 = TIO.succeed(1);
+        const p2 = TIO.succeed(2);
+        const p3 = TIO.succeed(3);
+        assert.deepEqual(await runtime.unsafeRun(TIO.all(p1, p2, p3)), [1, 2, 3]);
+
+        // Test that all fails if one fails
+        const pFail = TIO.fail("error");
+        assert.equal(await runtime.safeRunUnion(TIO.all(p1, pFail, p3)), "error");
+    });
+
+    it("sleep", async () => {
+        const start = Date.now();
+        await runtime.unsafeRun(TIO.sleep(100));
+        const elapsed = Date.now() - start;
+        assert.isTrue(elapsed >= 90); // Allow some tolerance
     });
 
 });

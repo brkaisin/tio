@@ -177,8 +177,6 @@ soon as possible. If you have any questions, feel free to open an issue.
 ## Todo
 
 - [ ] Fix todos
-- [ ] Fix tests (not all passing)
 - [ ] Write tests for runtime
-- [ ] rework tap and tapError to take TIO as arguments for purity
 - [ ] Check `fromPromise` to probably take `R` and remake `make` method (avoid direct usages of TIO constructor)
 - [ ] Configure prettier/hook to format code

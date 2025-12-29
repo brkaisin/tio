@@ -82,8 +82,36 @@ export class TIO<in R, out E, out A> {
         return new TIO<R & R1, E, [A, B]>((r) => Promise.all([this.run(r), that.run(r)]));
     }
 
+    zipLeft<R1, B>(that: TIO<R1, E, B>): TIO<R & R1, E, A> {
+        return this.zip(that).map(([a, _]) => a);
+    }
+
+    zipRight<R1, B>(that: TIO<R1, E, B>): TIO<R & R1, E, B> {
+        return this.zip(that).map(([_, b]) => b);
+    }
+
     zipWith<R1, B, C>(that: TIO<R1, E, B>, f: (a: A, b: B) => C): TIO<R & R1, E, C> {
         return this.zip(that).map(([a, b]) => f(a, b));
+    }
+
+    as<B>(b: B): TIO<R, E, B> {
+        return this.map(() => b);
+    }
+
+    unit(): TIO<R, E, void> {
+        return this.as(undefined);
+    }
+
+    delay(ms: number): TIO<R, E, A> {
+        return TIO.sleep(ms).flatMap(() => this);
+    }
+
+    ensuring<R1>(finalizer: TIO<R1, never, unknown>): TIO<R & R1, E, A> {
+        return new TIO<R & R1, E, A>((r) =>
+            this.run(r)
+                .then(a => finalizer.run(r).then(() => a))
+                .catch(e => finalizer.run(r).then(() => Promise.reject(e)))
+        );
     }
 
     retry(n: number): TIO<R, E, A> {
@@ -132,5 +160,13 @@ export class TIO<in R, out E, out A> {
 
     static race<R, E, A>(...tios: Array<TIO<R, E, A>>): TIO<R, E, A> {
         return new TIO<R, E, A>((r) => Promise.race(tios.map(tio => tio.run(r))));
+    }
+
+    static all<R, E, A>(...tios: Array<TIO<R, E, A>>): TIO<R, E, Array<A>> {
+        return new TIO<R, E, Array<A>>((r) => Promise.all(tios.map(tio => tio.run(r))));
+    }
+
+    static sleep(ms: number): UIO<void> {
+        return new TIO<void, never, void>(() => new Promise(resolve => setTimeout(resolve, ms)));
     }
 }

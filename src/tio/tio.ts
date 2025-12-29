@@ -12,7 +12,8 @@ export type TIOOp<R, E, A> =
     | { _tag: "FoldM"; run: <B>(cont: <A1, E1>(tio: TIO<R, E1, A1>, onError: (e1: E1) => TIO<R, E, A>, onSuccess: (a1: A1) => TIO<R, E, A>) => B) => B }
     | { _tag: "Race"; tios: Array<TIO<R, E, A>> }
     | { _tag: "All"; run: <B>(cont: <A1>(tios: Array<TIO<R, E, A1>>) => B) => B }
-    | { _tag: "Ensuring"; run: <B>(cont: <E1>(tio: TIO<R, E1, A>, finalizer: TIO<R, never, unknown>) => B) => B };
+    | { _tag: "Ensuring"; run: <B>(cont: <E1>(tio: TIO<R, E1, A>, finalizer: TIO<R, never, unknown>) => B) => B }
+    | { _tag: "Sleep"; ms: number };
 
 export class TIO<in R, out E, out A> {
     /** @internal */
@@ -197,8 +198,6 @@ export class TIO<in R, out E, out A> {
     }
 
     static sleep(ms: number): UIO<void> {
-        return TIO.async<void, never, void>((_, resolve) => {
-            setTimeout(() => resolve(undefined), ms);
-        });
+        return new TIO<void, never, void>({ _tag: "Sleep", ms });
     }
 }

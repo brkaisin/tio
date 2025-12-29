@@ -57,6 +57,9 @@ export class Runtime<in R> {
                         .then(a => this.interpret(finalizer).then(() => a))
                         .catch(e => this.interpret(finalizer).then(() => Promise.reject(e)))
                 );
+
+            case "Sleep":
+                return new Promise<A>(resolve => setTimeout(() => resolve(undefined as A), op.ms));
         }
     }
 

@@ -1,6 +1,7 @@
 import { assert, describe, it } from "vitest";
 import {
     both,
+    CauseTag,
     defects,
     die,
     empty,
@@ -26,13 +27,13 @@ describe("Cause", () => {
 
     describe("constructors", () => {
         it("should create an Empty cause", () => {
-            assert.equal(empty._tag, "Empty");
+            assert.equal(empty._tag, CauseTag.Empty);
         });
 
         it("should create a Fail cause", () => {
             const cause = fail("error");
-            assert.equal(cause._tag, "Fail");
-            if (cause._tag === "Fail") {
+            assert.equal(cause._tag, CauseTag.Fail);
+            if (cause._tag === CauseTag.Fail) {
                 assert.equal(cause.error, "error");
             }
         });
@@ -40,56 +41,56 @@ describe("Cause", () => {
         it("should create a Die cause", () => {
             const error = new Error("unexpected");
             const cause = die(error);
-            assert.equal(cause._tag, "Die");
-            if (cause._tag === "Die") {
+            assert.equal(cause._tag, CauseTag.Die);
+            if (cause._tag === CauseTag.Die) {
                 assert.equal(cause.defect, error);
             }
         });
 
         it("should create an Interrupt cause", () => {
             const cause = interrupt(fiberId1);
-            assert.equal(cause._tag, "Interrupt");
-            if (cause._tag === "Interrupt") {
+            assert.equal(cause._tag, CauseTag.Interrupt);
+            if (cause._tag === CauseTag.Interrupt) {
                 assert.equal(cause.fiberId, fiberId1);
             }
         });
 
         it("should create a Then cause for sequential failures", () => {
             const cause = sequential(fail("first"), fail("second"));
-            assert.equal(cause._tag, "Then");
-            if (cause._tag === "Then") {
-                assert.equal(cause.left._tag, "Fail");
-                assert.equal(cause.right._tag, "Fail");
+            assert.equal(cause._tag, CauseTag.Then);
+            if (cause._tag === CauseTag.Then) {
+                assert.equal(cause.left._tag, CauseTag.Fail);
+                assert.equal(cause.right._tag, CauseTag.Fail);
             }
         });
 
         it("should create a Both cause for parallel failures", () => {
             const cause = both(fail("left"), fail("right"));
-            assert.equal(cause._tag, "Both");
-            if (cause._tag === "Both") {
-                assert.equal(cause.left._tag, "Fail");
-                assert.equal(cause.right._tag, "Fail");
+            assert.equal(cause._tag, CauseTag.Both);
+            if (cause._tag === CauseTag.Both) {
+                assert.equal(cause.left._tag, CauseTag.Fail);
+                assert.equal(cause.right._tag, CauseTag.Fail);
             }
         });
 
         it("sequential should return right if left is empty", () => {
             const cause = sequential(empty, fail("error"));
-            assert.equal(cause._tag, "Fail");
+            assert.equal(cause._tag, CauseTag.Fail);
         });
 
         it("sequential should return left if right is empty", () => {
             const cause = sequential(fail("error"), empty);
-            assert.equal(cause._tag, "Fail");
+            assert.equal(cause._tag, CauseTag.Fail);
         });
 
         it("both should return right if left is empty", () => {
             const cause = both(empty, fail("error"));
-            assert.equal(cause._tag, "Fail");
+            assert.equal(cause._tag, CauseTag.Fail);
         });
 
         it("both should return left if right is empty", () => {
             const cause = both(fail("error"), empty);
-            assert.equal(cause._tag, "Fail");
+            assert.equal(cause._tag, CauseTag.Fail);
         });
     });
 
@@ -263,13 +264,13 @@ describe("Cause", () => {
         describe("map", () => {
             it("should not change Empty", () => {
                 const result = map(empty, (x: string) => x.toUpperCase());
-                assert.equal(result._tag, "Empty");
+                assert.equal(result._tag, CauseTag.Empty);
             });
 
             it("should transform Fail error", () => {
                 const result = map(fail("error"), (x) => x.toUpperCase());
-                assert.equal(result._tag, "Fail");
-                if (result._tag === "Fail") {
+                assert.equal(result._tag, CauseTag.Fail);
+                if (result._tag === CauseTag.Fail) {
                     assert.equal(result.error, "ERROR");
                 }
             });
@@ -277,15 +278,15 @@ describe("Cause", () => {
             it("should not change Die", () => {
                 const error = new Error("defect");
                 const result = map(die(error), (x: string) => x.toUpperCase());
-                assert.equal(result._tag, "Die");
-                if (result._tag === "Die") {
+                assert.equal(result._tag, CauseTag.Die);
+                if (result._tag === CauseTag.Die) {
                     assert.equal(result.defect, error);
                 }
             });
 
             it("should not change Interrupt", () => {
                 const result = map(interrupt(fiberId1), (x: string) => x.toUpperCase());
-                assert.equal(result._tag, "Interrupt");
+                assert.equal(result._tag, CauseTag.Interrupt);
             });
 
             it("should transform nested Fail errors in Then", () => {

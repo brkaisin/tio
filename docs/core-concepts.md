@@ -44,7 +44,7 @@ Promises have untyped errors (`Promise<T>` doesn't tell you what errors can occu
 
 ```typescript
 // The type tells you this can fail with a string
-const effect: TIO<never, string, number> = TIO.fail("oops");
+const effect = TIO.fail("oops"); // IO<string, never>
 ```
 
 ### 3. Laziness
@@ -146,7 +146,7 @@ const customRuntime = Runtime.default
 | `.map(f)` | Transform success value |
 | `.mapError(f)` | Transform error value |
 | `.flatMap(f)` | Chain with another effect |
-| `.flatten()` | Flatten nested effect |
+| `TIO.flatten(effect)` | Flatten nested effect |
 | `.as(b)` | Replace success value |
 | `.unit()` | Discard success value |
 

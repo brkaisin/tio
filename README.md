@@ -85,7 +85,7 @@ await Runtime.default.unsafeRun(effect);
 Errors are part of the type signature:
 
 ```typescript
-const divide = (a: number, b: number): TIO<never, "division by zero", number> =>
+const divide = (a: number, b: number): TIO<void, "division by zero", number> =>
     b === 0 ? TIO.fail("division by zero") : TIO.succeed(a / b);
 ```
 
@@ -143,5 +143,6 @@ If you want to contribute, fork the repository and create a pull request. Feel f
 
 ## Todo
 
+- [ ] Publish to npm
 - [ ] Configure prettier hook to format code
 

@@ -288,6 +288,7 @@ const results = await runtime.unsafeRun(
 ```typescript
 import { TIO } from "tio/tio";
 import { Runtime } from "tio/runtime";
+import { isRight } from "tio/util/either";
 
 const runtime = Runtime.default;
 
@@ -297,31 +298,33 @@ const fetchOrders = TIO.succeed([{ id: 101 }, { id: 102 }]).delay(150);
 const fetchRecommendations = TIO.succeed(["item1", "item2"]).delay(80);
 
 // Fetch all data concurrently with a 200ms timeout
-const fetchDashboardData = TIO.forkAll([fetchUser, fetchOrders, fetchRecommendations])
-    .flatMap((fibers) => {
-        const [userFiber, ordersFiber, recsFiber] = fibers;
-        
-        return TIO.raceFirst(
-            // Wait for all to complete
-            TIO.joinFiber(userFiber).flatMap((user) =>
-                TIO.joinFiber(ordersFiber).flatMap((orders) =>
-                    TIO.joinFiber(recsFiber).map((recommendations) => ({
-                        user,
-                        orders,
-                        recommendations
-                    }))
-                )
-            ),
-            // Or timeout after 200ms
-            TIO.sleep(200).flatMap(() => TIO.fail("Dashboard load timeout"))
-        );
-    });
+// Fork each effect individually to preserve types
+const fetchDashboardData = fetchUser.fork().flatMap((userFiber) =>
+    fetchOrders.fork().flatMap((ordersFiber) =>
+        fetchRecommendations.fork().flatMap((recsFiber) => {
+            return TIO.raceFirst(
+                // Wait for all to complete
+                TIO.joinFiber(userFiber).flatMap((user) =>
+                    TIO.joinFiber(ordersFiber).flatMap((orders) =>
+                        TIO.joinFiber(recsFiber).map((recommendations) => ({
+                            user,
+                            orders,
+                            recommendations
+                        }))
+                    )
+                ),
+                // Or timeout after 200ms
+                TIO.sleep(200).flatMap(() => TIO.fail("Dashboard load timeout" as const))
+            );
+        })
+    )
+);
 
 runtime.safeRunEither(fetchDashboardData).then((result) => {
-    if (result._tag === "Right") {
-        console.log("Dashboard data:", result.value);
+    if (isRight(result)) {
+        console.log("Dashboard data:", result.right);
     } else {
-        console.error("Failed:", result.value);
+        console.error("Failed:", result.left);
     }
 });
 ```

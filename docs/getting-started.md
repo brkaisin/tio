@@ -64,7 +64,7 @@ const sync = TIO.make(() => {
 ### From Async Callbacks
 
 ```typescript
-const async = TIO.async<never, Error, string>((_, resolve, reject) => {
+const async = TIO.async<unknown, Error, string>((_, resolve, reject) => {
     setTimeout(() => resolve("done"), 1000);
 });
 ```

@@ -24,7 +24,7 @@ const logMessage: TIO<{ Logger: Logger }, never, void> =
     TIO.make((env) => env.Logger.log("Hello!"));
 
 // This effect needs nothing
-const pure: TIO<never, never, number> = TIO.succeed(42);
+const pure: TIO<void, never, number> = TIO.succeed(42);
 ```
 
 ## Defining Services
@@ -217,6 +217,7 @@ const appRuntime = repositoryRuntime
 import { TIO } from "tio/tio";
 import { Runtime } from "tio/runtime";
 import { tag, Tag, Has } from "tio/tag";
+import { isRight } from "tio/util/either";
 
 // ============ Service Definitions ============
 
@@ -301,10 +302,10 @@ const runtime: Runtime<AppEnv> = Runtime.default
 // ============ Run ============
 
 runtime.safeRunEither(getUser(1)).then((result) => {
-    if (result._tag === "Right") {
-        console.log("User:", result.value);
+    if (isRight(result)) {
+        console.log("User:", result.right);
     } else {
-        console.log("Error:", result.value);
+        console.log("Error:", result.left);
     }
 });
 ```

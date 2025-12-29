@@ -3,6 +3,8 @@ import { Either, left, right } from "./util/either";
 import { identity, isNever } from "./util/functions";
 import { Has, Tag } from "./tag";
 import { Exit, failure, success } from "./util/exit";
+import { FiberContext, fiberFailure, fiberSuccess, InterruptedException } from "./fiber";
+import { fail as causeFail, interrupt as causeInterrupt } from "./cause";
 
 /**
  * Interface for TIO runtime interpreters.
@@ -84,6 +86,35 @@ class PromiseRuntime<in R> implements Runtime<R> {
 
             case "Sleep":
                 return new Promise<A>((resolve) => setTimeout(() => resolve(undefined as A), op.ms));
+
+            case "Fork": {
+                return op.run((tioToFork) => {
+                    const childFiber = new FiberContext<unknown, unknown>();
+
+                    // Start the forked effect in the next microtask
+                    queueMicrotask(() => {
+                        this.interpret(tioToFork as TIO<R, unknown, unknown>)
+                            .then((value) => childFiber.done(fiberSuccess(value)))
+                            .catch((error) => {
+                                if (error instanceof InterruptedException) {
+                                    childFiber.done(fiberFailure(causeInterrupt(error.fiberId)));
+                                } else {
+                                    childFiber.done(fiberFailure(causeFail(error)));
+                                }
+                            });
+                    });
+
+                    return Promise.resolve(childFiber);
+                }) as Promise<A>;
+            }
+
+            case "SetInterruptible":
+                // In the basic runtime, just execute the inner effect
+                return this.interpret(op.tio);
+
+            case "CheckInterrupt":
+                // In the basic runtime, never interrupted
+                return Promise.resolve(undefined as A);
 
             default:
                 isNever(op);

@@ -30,9 +30,19 @@ are eager and do not feature a typed error channel. TIO addresses all of these p
 
 ## How does TIO work?
 
-TIO is a simple wrapper around a function that takes an argument of type `R` and returns a `Promise<A>`. This `Promise`
-can fail with an error of type `E`. The `R` type is the environment that the effect needs to run. This can be anything,
-but it is usually an object that contains all the dependencies that the effect needs to run.
+TIO is a pure data structure (an Algebraic Data Type) that describes effectful computations without executing them.
+Each TIO operation (like `map`, `flatMap`, `race`, etc.) builds up a tree of operations. The actual execution
+is handled by the `Runtime`, which interprets this tree using Promises.
+
+This separation of description and execution means:
+- TIO is truly lazy and referentially transparent
+- The execution strategy is determined by the Runtime
+- Different Runtimes could be created for testing, tracing, or alternative execution models
+
+The `TIO<R, E, A>` type has three type parameters:
+- `R`: The environment/dependencies the effect needs to run
+- `E`: The type of errors the effect can fail with
+- `A`: The type of the success value
 
 To effectively run an effect, you need to provide a `Runtime` that contains all the dependencies that the effect needs
 to run.
@@ -107,19 +117,23 @@ type HasLogger = Has<typeof LoggerTag>
 type HasDB = Has<typeof DBTag>
 
 function log(s: string): URIO<HasLogger, void> {
-    return TIO.make<HasLogger, never, void>((env) => env.Logger.log(s));
+    return TIO.make<HasLogger, void>((env) => env.Logger.log(s));
 }
 
 type DbError = string
 
 function queryDb(sql: string): TIO<HasDB, DbError, DbResult> {
-    return new TIO<HasDB, never, DbResult>((env) => env.DB.query(sql));
+    return TIO.async<HasDB, DbError, DbResult>((env, resolve, reject) => {
+        env.DB.query(sql).then(resolve).catch(reject);
+    });
 }
 
 type Env = HasLogger & HasDB
 
 const queryDbAndLogResult: TIO<Env, DbError, void> =
     queryDb("SELECT * FROM some_table")
+        .tap(result => log(`Query succeeded: ${JSON.stringify(result)}`))
+        .tapError(error => log(`Query failed: ${error}`))
         .retry(2)
         .map(JSON.stringify)
         .flatMap(log)

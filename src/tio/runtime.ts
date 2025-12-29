@@ -1,6 +1,6 @@
 import { TIO, TIOOp } from "./tio";
 import { Either, left, right } from "./util/either";
-import { identity } from "./util/functions";
+import {identity, isNever} from "./util/functions";
 import { Has, Tag } from "./tag";
 import { Exit, failure, success } from "./util/exit";
 
@@ -38,11 +38,15 @@ export class Runtime<in R> {
             case "FoldM":
                 return op.run((tio, onError, onSuccess) =>
                     this.interpret(tio).then(
-                        z => this.interpret(onSuccess(z)),
-                        e => this.interpret(onError(e))
+                        a1 => this.interpret(onSuccess(a1)),
+                        e1 => this.interpret(onError(e1))
                     )
                 );
 
+            // Note: Due to JavaScript's single-threaded nature, synchronous operations
+            // cannot be truly "raced" - they run to completion before any other code executes.
+            // This works correctly for async operations (e.g., setTimeout, fetch),
+            // but synchronous CPU-bound tasks will complete in the order they are started.
             case "Race":
                 return Promise.race(op.tios.map(t => this.interpret(t)));
 
@@ -60,6 +64,9 @@ export class Runtime<in R> {
 
             case "Sleep":
                 return new Promise<A>(resolve => setTimeout(() => resolve(undefined as A), op.ms));
+
+            default:
+                isNever(op);
         }
     }
 

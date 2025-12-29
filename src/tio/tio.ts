@@ -2,7 +2,8 @@ import { identity } from "./util/functions";
 import { IO, UIO, URIO } from "./aliases";
 import { Either, fold } from "./util/either";
 
-// Internal operation types for the TIO ADT
+// TIO ADT operations
+// `cont` = continuation, used for type-safe existential encoding via CPS
 export type TIOOp<R, E, A> =
     | { _tag: "Succeed"; value: A }
     | { _tag: "Fail"; error: E }
@@ -143,11 +144,6 @@ export class TIO<in R, out E, out A> {
         return this.orElse(this.retry(n - 1));
     }
 
-    // Note: Due to JavaScript's single-threaded nature, synchronous operations inside Promise
-    // executors cannot be truly "raced" - they run to completion before any other code executes.
-    // This race implementation works correctly for async operations (e.g., setTimeout, fetch),
-    // but synchronous CPU-bound tasks will complete in the order they are started.
-    // True parallelism for synchronous operations would require Worker Threads.
     race<R1, E1, B>(...tios: Array<TIO<R1, E1, B>>): TIO<R & R1, E | E1, A | B> {
         return TIO.race<R & R1, E | E1, A | B>(this, ...tios);
     }

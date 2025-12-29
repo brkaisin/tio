@@ -70,26 +70,30 @@ describe("TIO", () => {
 
     it("tap", async () => {
         let count = 0;
-        assert.equal(await runtime.unsafeRun(TIO.succeed(1).tap(x => count = x)), 1);
+        const effect = TIO.succeed(1).tap(x => TIO.succeed(count = x));
+        assert.equal(await runtime.unsafeRun(effect), 1);
         assert.equal(count, 1);
     });
 
     it("tapError", async () => {
         let error = "";
-        assert.equal(await runtime.safeRunUnion(TIO.fail("error").tapError(e => error = e)), "error");
+        const effect = TIO.fail("error").tapError(e => TIO.succeed(error = e));
+        assert.equal(await runtime.safeRunUnion(effect), "error");
         assert.equal(error, "error");
     });
 
     it("tapBoth", async () => {
         let value = 0;
         let error = "";
-        assert.equal(await runtime.unsafeRun(TIO.succeed(1).tapBoth(x => value = x, e => error = e)), 1);
+        const successEffect = TIO.succeed(1).tapBoth(x => TIO.succeed(value = x), e => TIO.succeed(error = e));
+        assert.equal(await runtime.unsafeRun(successEffect), 1);
         assert.equal(value, 1);
         assert.equal(error, "");
 
         value = 0;
         error = "";
-        assert.equal(await runtime.safeRunUnion(TIO.fail("error").tapBoth(x => value = x, e => error = e)), "error");
+        const failEffect = TIO.fail("error").tapBoth(x => TIO.succeed(value = x), e => TIO.succeed(error = e));
+        assert.equal(await runtime.safeRunUnion(failEffect), "error");
         assert.equal(value, 0);
         assert.equal(error, "error");
     });

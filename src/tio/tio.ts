@@ -31,22 +31,18 @@ export class TIO<in R, out E, out A> {
         );
     }
 
-    tap(f: (a: A) => void): TIO<R, E, A> {
-        return this.map(a => {
-            f(a);
-            return a;
-        });
+    tap<R1, E1>(f: (a: A) => TIO<R1, E1, unknown>): TIO<R & R1, E | E1, A> {
+        return this.flatMap(a => f(a).map(() => a));
     }
 
-    tapError(f: (e: E) => void): TIO<R, E, A> {
-        return this.mapError(e => {
-            f(e);
-            return e;
-        });
+    tapError<R1, E1>(f: (e: E) => TIO<R1, E1, unknown>): TIO<R & R1, E | E1, A> {
+        return new TIO<R & R1, E | E1, A>((r) =>
+            this.run(r).catch(e => f(e).run(r).then(() => Promise.reject(e)))
+        );
     }
 
-    tapBoth(f: (a: A) => void, g: (e: E) => void): TIO<R, E, A> {
-        return this.tap(f).tapError(g);
+    tapBoth<R1, E1>(f: (a: A) => TIO<R1, E1, unknown>, g: (e: E) => TIO<R1, E1, unknown>): TIO<R & R1, E | E1, A> {
+        return this.tap(f).tapError(g as (e: E | E1) => TIO<R1, E1, unknown>);
     }
 
     flip(): TIO<R, A, E> {

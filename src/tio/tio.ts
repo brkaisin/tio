@@ -102,7 +102,7 @@ export class TIO<in R, out E, out A> {
     // but synchronous CPU-bound tasks will complete in the order they are started.
     // True parallelism for synchronous operations would require Worker Threads.
     race<R1, E1, B>(...tios: Array<TIO<R1, E1, B>>): TIO<R & R1, E | E1, A | B> {
-        return new TIO<R & R1, E | E1, A | B>((r) => Promise.race([this.run(r), ...tios.map(tio => tio.run(r))]));
+        return TIO.race<R & R1, E | E1, A | B>(this, ...tios);
     }
 
     timeout(ms: number): TIO<R, E, A | null> {
@@ -132,5 +132,9 @@ export class TIO<in R, out E, out A> {
 
     static fail<E>(e: E): IO<E, never> {
         return TIO.fromPromise<E, never>(() => Promise.reject(e));
+    }
+
+    static race<R, E, A>(...tios: Array<TIO<R, E, A>>): TIO<R, E, A> {
+        return new TIO<R, E, A>((r) => Promise.race(tios.map(tio => tio.run(r))));
     }
 }

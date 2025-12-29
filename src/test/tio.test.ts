@@ -132,6 +132,7 @@ describe("TIO", () => {
         const p1 = TIO.fromPromise(() => new Promise(resolve => setTimeout(() => resolve(1), 100)));
         const p2 = TIO.fromPromise(() => new Promise(resolve => setTimeout(() => resolve(2), 200)));
         const p3 = TIO.fromPromise(() => new Promise(resolve => setTimeout(() => resolve(3), 300)));
+
         assert.equal(await runtime.unsafeRun(p1.race(p2)), 1);
         assert.equal(await runtime.unsafeRun(p2.race(p1)), 1);
         assert.equal(await runtime.unsafeRun(p1.race(p2, p3)), 1);
@@ -140,6 +141,11 @@ describe("TIO", () => {
         assert.equal(await runtime.unsafeRun(p2.race(p3, p1)), 1);
         assert.equal(await runtime.unsafeRun(p3.race(p1, p2)), 1);
         assert.equal(await runtime.unsafeRun(p3.race(p2, p1)), 1);
+
+        assert.equal(await runtime.unsafeRun(TIO.race(p1, p2)), 1);
+        assert.equal(await runtime.unsafeRun(TIO.race(p2, p1)), 1);
+        assert.equal(await runtime.unsafeRun(TIO.race(p1, p2, p3)), 1);
+        assert.equal(await runtime.unsafeRun(TIO.race(p3, p2, p1)), 1);
 
         const p4 = TIO.fromPromise(() => new Promise(resolve => {
             for (let i = 0; i < 1; i++) {

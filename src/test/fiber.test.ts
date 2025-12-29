@@ -1,16 +1,17 @@
-import { describe, it, assert } from "vitest";
+import { assert, describe, it } from "vitest";
 import { TIO } from "../tio/tio";
 import { Runtime } from "../tio/runtime";
 import {
-    FiberContext,
-    fiberSuccess,
-    fiberFailure,
-    isFiberSuccess,
-    isFiberFailure,
     combineFiberExits,
-    InterruptedException
+    FiberContext,
+    fiberFailure,
+    fiberSuccess,
+    InterruptedException,
+    isFiberFailure,
+    isFiberSuccess
 } from "../tio/fiber";
-import { fail as causeFail, both, interrupt as causeInterrupt } from "../tio/cause";
+import { fail as causeFail } from "../tio/cause";
+import { isLeft, isRight } from "../tio/util/either";
 
 describe("Fiber", () => {
     const runtime: Runtime<never> = Runtime.default;
@@ -59,8 +60,8 @@ describe("Fiber", () => {
                 .flatMap((fiber) => TIO.sleep(10).flatMap(() => TIO.joinFiber(fiber)));
 
             const result = await runtime.safeRunEither(effect);
-            assert.isTrue("left" in result);
-            if ("left" in result) {
+            assert.isTrue(isLeft(result));
+            if (isLeft(result)) {
                 assert.equal(result.left, "error");
             }
         });
@@ -138,7 +139,7 @@ describe("Fiber", () => {
 
             // awaitFiber should succeed even if the fiber fails
             const result = await runtime.safeRunEither(effect);
-            assert.isTrue("right" in result);
+            assert.isTrue(isRight(result));
         });
     });
 
@@ -257,8 +258,8 @@ describe("Fiber", () => {
             const slow = TIO.succeed("slow").delay(100);
 
             const result = await runtime.safeRunEither(TIO.raceFirst(failFast, slow));
-            assert.isTrue("left" in result);
-            if ("left" in result) {
+            assert.isTrue(isLeft(result));
+            if (isLeft(result)) {
                 assert.equal(result.left, "error");
             }
         });

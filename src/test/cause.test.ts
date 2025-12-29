@@ -1,23 +1,22 @@
-import { describe, it, assert } from "vitest";
+import { assert, describe, it } from "vitest";
 import {
-    Cause,
+    both,
+    defects,
+    die,
     empty,
     fail,
-    die,
+    failures,
     interrupt,
-    sequential,
-    both,
+    interruptors,
+    isDie,
     isEmpty,
     isFailure,
     isInterrupted,
-    isDie,
-    failures,
-    defects,
-    interruptors,
+    makeFiberId,
     map,
-    squash,
     prettyPrint,
-    makeFiberId
+    sequential,
+    squash
 } from "../tio/cause";
 
 describe("Cause", () => {

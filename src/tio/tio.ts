@@ -1,7 +1,6 @@
 import { identity } from "./util/functions";
 import { IO, UIO, URIO } from "./aliases";
 import { Either, fold } from "./util/either";
-import { subType, SubType, superType, SuperType } from "./util/typeConstraints";
 
 export class TIO<in R, out E, out A> {
     constructor(private readonly run: (r: R) => Promise<A>) {}
@@ -75,13 +74,12 @@ export class TIO<in R, out E, out A> {
         );
     }
 
-    augmentError<E1>(ev: SuperType<E1, E>): TIO<R, E1, A> {
-        return this.mapError(e => superType(e, ev));
+    augmentError<E1>(this: E extends E1 ? TIO<R, E, A> : never): TIO<R, E1, A> {
+        return this.mapError(identity);
     }
 
-    //   final def absolve[E1 >: E, B](implicit ev: A <:< Either[E1, B]): ZIO[R, E1, B]
-    absolve<E1, B>(ev: SubType<A, Either<E1, B>>): TIO<R, E | E1, B> {
-        return this.flatMap(a => TIO.fromEither(subType(a, ev)));
+    absolve<E1, B>(this: TIO<R, E, Either<E1, B>>): TIO<R, E | E1, B> {
+        return this.flatMap(TIO.fromEither);
     }
 
     zip<R1, B>(that: TIO<R1, E, B>): TIO<R & R1, E, [A, B]> {

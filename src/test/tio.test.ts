@@ -29,26 +29,6 @@ describe("TIO", () => {
         );
     });
 
-    // todo: these tests concern the runtime and should go in future dedicated runtime tests
-    it("unsafeRunPromise", async () => {
-        assert.equal(await runtime.unsafeRun(TIO.succeed(1)), 1);
-    });
-
-    it("safeRunUnion", async () => {
-        assert.equal(await runtime.safeRunUnion(TIO.succeed(1)), 1);
-        assert.equal(await runtime.safeRunUnion(TIO.fail("error")), "error");
-    });
-
-    it("safeRunEither", async () => {
-        assert.deepEqual(await runtime.safeRunEither(TIO.succeed(1)), right(1));
-        assert.deepEqual(await runtime.safeRunEither(TIO.fail("error")), left("error"));
-    });
-
-    it("safeRunExit", async () => {
-        assert.deepEqual(await runtime.safeRunExit(TIO.succeed(1)), success(1));
-        assert.deepEqual(await runtime.safeRunExit(TIO.fail("error")), failure("error"));
-    });
-
     it("flatten", async () => {
         assert.equal(await runtime.unsafeRun(TIO.flatten(TIO.succeed(TIO.succeed(1)))), 1);
     });

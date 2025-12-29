@@ -4,7 +4,31 @@ import {identity, isNever} from "./util/functions";
 import { Has, Tag } from "./tag";
 import { Exit, failure, success } from "./util/exit";
 
-export class Runtime<in R> {
+/**
+ * Interface for TIO runtime interpreters.
+ *
+ * A Runtime interprets the TIO ADT and executes the described effects.
+ * Different implementations can provide different execution strategies.
+ */
+export interface Runtime<R> {
+    unsafeRun<E, A>(tio: TIO<R, E, A>): Promise<A>;
+    safeRunEither<E, A>(tio: TIO<R, E, A>): Promise<Either<E, A>>;
+    safeRunExit<E, A>(tio: TIO<R, E, A>): Promise<Exit<E, A>>;
+    safeRunUnion<E, A>(tio: TIO<R, E, A>): Promise<E | A>;
+    provideService<Id extends string, S>(tag: Tag<Id, S>, service: S): Runtime<R & Has<Tag<Id, S>>>;
+}
+
+/**
+ * Promise-based Runtime implementation.
+ *
+ * This runtime interprets the TIO ADT using JavaScript Promises.
+ * Alternative implementations could use:
+ * - Synchronous execution for testing
+ * - Fibers for cooperative multitasking
+ * - Web Workers for true parallelism
+ * - Custom schedulers for specific use cases
+ */
+class PromiseRuntime<in R> implements Runtime<R> {
     constructor(private readonly services: Record<string, unknown>) {}
 
     private interpret<E, A>(tio: TIO<R, E, A>): Promise<A> {
@@ -87,12 +111,22 @@ export class Runtime<in R> {
     }
 
     provideService<Id extends string, S>(tag: Tag<Id, S>, service: S): Runtime<R & Has<Tag<Id, S>>> {
-        return new Runtime({
+        return new PromiseRuntime({
             ...this.services,
             [tag.id]: service,
         });
     }
-
-    static default: Runtime<unknown> = new Runtime({});
 }
+
+const defaultRuntime: Runtime<unknown> = new PromiseRuntime({});
+
+export const Runtime = {
+    get default(): Runtime<unknown> {
+        return defaultRuntime;
+    },
+
+    withServices<R>(services: R): Runtime<R> {
+        return new PromiseRuntime(services as Record<string, unknown>);
+    }
+};
 

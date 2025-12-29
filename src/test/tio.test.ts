@@ -139,7 +139,7 @@ describe("TIO", () => {
 
     it("make", async () => {
         const tio = TIO.make((r: { value: number }) => r.value + 1);
-        const runtimeWithEnv: Runtime<{ value: number }> = new Runtime({ value: 41 });
+        const runtimeWithEnv: Runtime<{ value: number }> = Runtime.withServices({ value: 41 });
         assert.equal(await runtimeWithEnv.unsafeRun(tio), 42);
     });
 

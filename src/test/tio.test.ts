@@ -129,38 +129,33 @@ describe("TIO", () => {
     });
 
     it("race", async () => {
-        const p1 = TIO.fromPromise(() => new Promise(resolve => setTimeout(() => resolve(1), 1000)));
-        const p2 = TIO.fromPromise(() => new Promise(resolve => setTimeout(() => resolve(2), 2000)));
+        const p1 = TIO.fromPromise(() => new Promise(resolve => setTimeout(() => resolve(1), 100)));
+        const p2 = TIO.fromPromise(() => new Promise(resolve => setTimeout(() => resolve(2), 200)));
+        const p3 = TIO.fromPromise(() => new Promise(resolve => setTimeout(() => resolve(3), 300)));
         assert.equal(await runtime.unsafeRun(p1.race(p2)), 1);
         assert.equal(await runtime.unsafeRun(p2.race(p1)), 1);
+        assert.equal(await runtime.unsafeRun(p1.race(p2, p3)), 1);
+        assert.equal(await runtime.unsafeRun(p1.race(p3, p2)), 1);
+        assert.equal(await runtime.unsafeRun(p2.race(p1, p3)), 1);
+        assert.equal(await runtime.unsafeRun(p2.race(p3, p1)), 1);
+        assert.equal(await runtime.unsafeRun(p3.race(p1, p2)), 1);
+        assert.equal(await runtime.unsafeRun(p3.race(p2, p1)), 1);
 
-        const p3 = TIO.fromPromise(() => new Promise(resolve => {
+        const p4 = TIO.fromPromise(() => new Promise(resolve => {
             for (let i = 0; i < 1; i++) {
             }
             resolve(1);
         }));
-        const p4 = TIO.fromPromise(() => new Promise(resolve => {
+        const p5 = TIO.fromPromise(() => new Promise(resolve => {
             for (let i = 0; i < 1000000; i++) {
             }
             resolve(2);
         }));
-        assert.equal(await runtime.unsafeRun(p3.race(p4)), 1);
-        // Note: p4 resolves to 2 because synchronous operations in Promise executors run to completion
-        // before any other code executes. Since p4 is called first, its for-loop completes before p3 starts.
+        assert.equal(await runtime.unsafeRun(p4.race(p5)), 1);
+        // Note: p5 resolves to 2 because synchronous operations in Promise executors run to completion
+        // before any other code executes. Since p5 is called first, its for-loop completes before p4 starts.
         // This is a fundamental limitation of JavaScript's single-threaded nature.
-        assert.equal(await runtime.unsafeRun(p4.race(p3)), 2);
-    });
-
-    it("raceAll", async () => {
-        const p1 = TIO.fromPromise(() => new Promise(resolve => setTimeout(() => resolve(1), 100)));
-        const p2 = TIO.fromPromise(() => new Promise(resolve => setTimeout(() => resolve(2), 200)));
-        const p3 = TIO.fromPromise(() => new Promise(resolve => setTimeout(() => resolve(3), 300)));
-        assert.equal(await runtime.unsafeRun(p1.raceAll(p2, p3)), 1);
-        assert.equal(await runtime.unsafeRun(p1.raceAll(p3, p2)), 1);
-        assert.equal(await runtime.unsafeRun(p2.raceAll(p1, p3)), 1);
-        assert.equal(await runtime.unsafeRun(p2.raceAll(p3, p1)), 1);
-        assert.equal(await runtime.unsafeRun(p3.raceAll(p1, p2)), 1);
-        assert.equal(await runtime.unsafeRun(p3.raceAll(p2, p1)), 1);
+        assert.equal(await runtime.unsafeRun(p5.race(p4)), 2);
     });
 
     it("timeout", async () => {

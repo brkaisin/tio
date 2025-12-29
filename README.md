@@ -117,6 +117,8 @@ const program = TIO.succeed(42)
 Causes capture the complete failure story:
 
 ```typescript
+import { prettyPrint } from "tio/cause";
+
 const exit = await runtime.unsafeRun(
     effect.fork().flatMap((f) => TIO.awaitFiber(f))
 );

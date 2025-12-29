@@ -11,6 +11,15 @@ describe("Runtime", () => {
         assert.equal(await runtime.unsafeRun(TIO.succeed(1)), 1);
     });
 
+    it("unsafeRun throws on failure", async () => {
+        try {
+            await runtime.unsafeRun(TIO.fail("error"));
+            assert.fail("Expected unsafeRun to throw");
+        } catch (e) {
+            assert.equal(e, "error");
+        }
+    });
+
     it("safeRunUnion", async () => {
         assert.equal(await runtime.safeRunUnion(TIO.succeed(1)), 1);
         assert.equal(await runtime.safeRunUnion(TIO.fail("error")), "error");
@@ -26,4 +35,3 @@ describe("Runtime", () => {
         assert.deepEqual(await runtime.safeRunExit(TIO.fail("error")), failure("error"));
     });
 });
-

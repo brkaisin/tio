@@ -12,7 +12,16 @@ export type TIOOp<R, E, A> =
     | { _tag: "Sync"; f: (r: R) => A }
     | { _tag: "Async"; register: (r: R, resolve: (a: A) => void, reject: (e: E) => void) => void }
     | { _tag: "FlatMap"; run: <B>(cont: <A1>(tio: TIO<R, E, A1>, f: (a1: A1) => TIO<R, E, A>) => B) => B }
-    | { _tag: "FoldM"; run: <B>(cont: <A1, E1>(tio: TIO<R, E1, A1>, onError: (e1: E1) => TIO<R, E, A>, onSuccess: (a1: A1) => TIO<R, E, A>) => B) => B }
+    | {
+          _tag: "FoldM";
+          run: <B>(
+              cont: <A1, E1>(
+                  tio: TIO<R, E1, A1>,
+                  onError: (e1: E1) => TIO<R, E, A>,
+                  onSuccess: (a1: A1) => TIO<R, E, A>
+              ) => B
+          ) => B;
+      }
     | { _tag: "Race"; tios: Array<TIO<R, E, A>> }
     | { _tag: "All"; run: <B>(cont: <A1>(tios: Array<TIO<R, E, A1>>) => B) => B }
     | { _tag: "Ensuring"; run: <B>(cont: <E1>(tio: TIO<R, E1, A>, finalizer: TIO<R, never, unknown>) => B) => B }
@@ -51,14 +60,14 @@ export class TIO<in R, out E, out A> {
 
     /** Transforms the success value using the given function. */
     map<B>(f: (a: A) => B): TIO<R, E, B> {
-        return this.flatMap(a => TIO.succeed(f(a)));
+        return this.flatMap((a) => TIO.succeed(f(a)));
     }
 
     /** Transforms the error value using the given function. */
     mapError<E1>(f: (e: E) => E1): TIO<R, E1, A> {
         return this.foldM(
-            e => TIO.fail(f(e)),
-            a => TIO.succeed(a)
+            (e) => TIO.fail(f(e)),
+            (a) => TIO.succeed(a)
         );
     }
 
@@ -78,27 +87,27 @@ export class TIO<in R, out E, out A> {
 
     /** Chains this effect's error with another effect. */
     flatMapError<E1>(f: (e: E) => TIO<R, never, E1>): TIO<R, E1, A> {
-        return this.flipWith(tio => tio.flatMap(f));
+        return this.flipWith((tio) => tio.flatMap(f));
     }
 
     /** Returns this effect if it succeeds, otherwise returns the given effect. */
     orElse<R1, E1, B>(that: TIO<R1, E1, B>): TIO<R & R1, E1, A | B> {
         return this.foldM<R1, E1, A | B>(
             () => that,
-            a => TIO.succeed(a)
+            (a) => TIO.succeed(a)
         );
     }
 
     /** Executes a side effect on success, returning the original value. */
     tap<R1, E1>(f: (a: A) => TIO<R1, E1, unknown>): TIO<R & R1, E | E1, A> {
-        return this.flatMap(a => f(a).map(() => a));
+        return this.flatMap((a) => f(a).map(() => a));
     }
 
     /** Executes a side effect on error, returning the original error. */
     tapError<R1, E1>(f: (e: E) => TIO<R1, E1, unknown>): TIO<R & R1, E | E1, A> {
         return this.foldM(
-            e => f(e).flatMap(() => TIO.fail(e)),
-            a => TIO.succeed(a)
+            (e) => f(e).flatMap(() => TIO.fail(e)),
+            (a) => TIO.succeed(a)
         );
     }
 
@@ -124,8 +133,13 @@ export class TIO<in R, out E, out A> {
     foldM<R1, E1, B>(onError: (e: E) => TIO<R1, E1, B>, onSuccess: (a: A) => TIO<R1, E1, B>): TIO<R & R1, E1, B> {
         return new TIO<R & R1, E1, B>({
             _tag: "FoldM",
-            run: <C>(cont: <A1, E2>(tio: TIO<R & R1, E2, A1>, onErr: (e: E2) => TIO<R & R1, E1, B>, onSucc: (a1: A1) => TIO<R & R1, E1, B>) => C) =>
-                cont(this, onError, onSuccess)
+            run: <C>(
+                cont: <A1, E2>(
+                    tio: TIO<R & R1, E2, A1>,
+                    onErr: (e: E2) => TIO<R & R1, E1, B>,
+                    onSucc: (a1: A1) => TIO<R & R1, E1, B>
+                ) => C
+            ) => cont(this, onError, onSuccess)
         });
     }
 
@@ -225,7 +239,9 @@ export class TIO<in R, out E, out A> {
     /** Creates an effect from a Promise. */
     static fromPromise<E, A>(promise: () => Promise<A>, onError: (e: E) => E = identity<E>): IO<E, A> {
         return TIO.async<void, E, A>((_, resolve, reject) => {
-            promise().then(resolve).catch(e => reject(onError(e)));
+            promise()
+                .then(resolve)
+                .catch((e) => reject(onError(e)));
         });
     }
 

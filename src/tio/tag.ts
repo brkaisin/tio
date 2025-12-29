@@ -8,7 +8,7 @@ export type Tag<Id extends string, Service> = {
     readonly id: Id;
     /** @internal Phantom type to carry the Service type */
     readonly _S: Service;
-}
+};
 
 /**
  * Creates a new Tag for a service.
@@ -31,7 +31,4 @@ export function tag<Id extends string, Service>(id: Id): Tag<Id, Service> {
  * type HasLogger = Has<typeof LoggerTag>; // { Logger: Logger }
  * ```
  */
-export type Has<T extends Tag<string, unknown>> =
-    T extends Tag<infer I, infer S>
-        ? { [K in I]: S }
-        : never
+export type Has<T extends Tag<string, unknown>> = T extends Tag<infer I, infer S> ? { [K in I]: S } : never;

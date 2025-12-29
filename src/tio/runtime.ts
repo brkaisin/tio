@@ -1,6 +1,6 @@
 import { TIO, TIOOp } from "./tio";
 import { Either, left, right } from "./util/either";
-import {identity, isNever} from "./util/functions";
+import { identity, isNever } from "./util/functions";
 import { Has, Tag } from "./tag";
 import { Exit, failure, success } from "./util/exit";
 
@@ -32,7 +32,7 @@ class PromiseRuntime<in R> implements Runtime<R> {
     constructor(private readonly services: Record<string, unknown>) {}
 
     private interpret<E, A>(tio: TIO<R, E, A>): Promise<A> {
-        const op: TIOOp<R, E, A> = tio['op'];
+        const op: TIOOp<R, E, A> = tio["op"];
         const r = this.services as R;
 
         switch (op._tag) {
@@ -55,15 +55,13 @@ class PromiseRuntime<in R> implements Runtime<R> {
                 });
 
             case "FlatMap":
-                return op.run((tio, f) =>
-                    this.interpret(tio).then(z => this.interpret(f(z)))
-                );
+                return op.run((tio, f) => this.interpret(tio).then((z) => this.interpret(f(z))));
 
             case "FoldM":
                 return op.run((tio, onError, onSuccess) =>
                     this.interpret(tio).then(
-                        a1 => this.interpret(onSuccess(a1)),
-                        e1 => this.interpret(onError(e1))
+                        (a1) => this.interpret(onSuccess(a1)),
+                        (e1) => this.interpret(onError(e1))
                     )
                 );
 
@@ -72,22 +70,20 @@ class PromiseRuntime<in R> implements Runtime<R> {
             // This works correctly for async operations (e.g., setTimeout, fetch),
             // but synchronous CPU-bound tasks will complete in the order they are started.
             case "Race":
-                return Promise.race(op.tios.map(t => this.interpret(t)));
+                return Promise.race(op.tios.map((t) => this.interpret(t)));
 
             case "All":
-                return op.run(tios =>
-                    Promise.all(tios.map(t => this.interpret(t)))
-                ) as Promise<A>;
+                return op.run((tios) => Promise.all(tios.map((t) => this.interpret(t)))) as Promise<A>;
 
             case "Ensuring":
                 return op.run((tio, finalizer) =>
                     this.interpret(tio)
-                        .then(a => this.interpret(finalizer).then(() => a))
-                        .catch(e => this.interpret(finalizer).then(() => Promise.reject(e)))
+                        .then((a) => this.interpret(finalizer).then(() => a))
+                        .catch((e) => this.interpret(finalizer).then(() => Promise.reject(e)))
                 );
 
             case "Sleep":
-                return new Promise<A>(resolve => setTimeout(() => resolve(undefined as A), op.ms));
+                return new Promise<A>((resolve) => setTimeout(() => resolve(undefined as A), op.ms));
 
             default:
                 isNever(op);
@@ -113,7 +109,7 @@ class PromiseRuntime<in R> implements Runtime<R> {
     provideService<Id extends string, S>(tag: Tag<Id, S>, service: S): Runtime<R & Has<Tag<Id, S>>> {
         return new PromiseRuntime({
             ...this.services,
-            [tag.id]: service,
+            [tag.id]: service
         });
     }
 }
@@ -129,4 +125,3 @@ export const Runtime = {
         return new PromiseRuntime(services as Record<string, unknown>);
     }
 };
-

@@ -7,10 +7,9 @@ export default defineConfig({
         include: ["**/*.test.ts"],
         sequence: {
             concurrent: true
-        },
+        }
     },
     esbuild: {
-        target: "ES2022",
-    },
-
-})
+        target: "ES2022"
+    }
+});

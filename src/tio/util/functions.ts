@@ -3,5 +3,5 @@ export function identity<X>(x: X): X {
 }
 
 export function isNever(_: never): never {
-    throw new Error('This code should be unreachable');
+    throw new Error("This code should be unreachable");
 }

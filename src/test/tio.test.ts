@@ -1,4 +1,4 @@
-import { assert, describe, it } from "vitest"
+import { assert, describe, it } from "vitest";
 import { TIO } from "../tio/tio";
 import { left, right } from "../tio/util/either";
 import { Runtime } from "../tio/runtime";
@@ -18,8 +18,15 @@ describe("TIO", () => {
     it("fromPromise", async () => {
         assert.equal(await runtime.unsafeRun(TIO.fromPromise(() => Promise.resolve(1))), 1);
         assert.equal(await runtime.safeRunUnion(TIO.fromPromise(() => Promise.reject("error"))), "error");
-        assert.deepEqual(await runtime.safeRunUnion(TIO.fromPromise(() => Promise.reject("error"), (unknownError) =>
-            new Error(`Something went wrong: ${unknownError}`))), new Error("Something went wrong: error"));
+        assert.deepEqual(
+            await runtime.safeRunUnion(
+                TIO.fromPromise(
+                    () => Promise.reject("error"),
+                    (unknownError) => new Error(`Something went wrong: ${unknownError}`)
+                )
+            ),
+            new Error("Something went wrong: error")
+        );
     });
 
     // todo: these tests concern the runtime and should go in future dedicated runtime tests
@@ -47,37 +54,53 @@ describe("TIO", () => {
     });
 
     it("map", async () => {
-        assert.equal(await runtime.unsafeRun(TIO.succeed(1).map(x => x + 1)), 2);
+        assert.equal(await runtime.unsafeRun(TIO.succeed(1).map((x) => x + 1)), 2);
     });
 
     it("mapError", async () => {
-        assert.equal(await runtime.safeRunUnion(TIO.fail("error").mapError(x => x + "1")), "error1");
+        assert.equal(await runtime.safeRunUnion(TIO.fail("error").mapError((x) => x + "1")), "error1");
     });
 
     it("mapBoth", async () => {
-        assert.equal(await runtime.safeRunUnion(TIO.fail("error").mapBoth(x => x + "1", x => x + 1)), "error1");
-        assert.equal(await runtime.unsafeRun(TIO.succeed(1).mapBoth(x => x + "1", x => x + 1)), 2);
+        assert.equal(
+            await runtime.safeRunUnion(
+                TIO.fail("error").mapBoth(
+                    (x) => x + "1",
+                    (x) => x + 1
+                )
+            ),
+            "error1"
+        );
+        assert.equal(
+            await runtime.unsafeRun(
+                TIO.succeed(1).mapBoth(
+                    (x) => x + "1",
+                    (x) => x + 1
+                )
+            ),
+            2
+        );
     });
 
     it("flatMap", async () => {
-        assert.equal(await runtime.unsafeRun(TIO.succeed(1).flatMap(x => TIO.succeed(x + 1))), 2);
-        assert.equal(await runtime.safeRunUnion(TIO.fail("error").flatMap(x => TIO.fail(x + "1"))), "error");
+        assert.equal(await runtime.unsafeRun(TIO.succeed(1).flatMap((x) => TIO.succeed(x + 1))), 2);
+        assert.equal(await runtime.safeRunUnion(TIO.fail("error").flatMap((x) => TIO.fail(x + "1"))), "error");
     });
 
     it("flatMapError", async () => {
-        assert.equal(await runtime.safeRunUnion(TIO.fail("error").flatMapError(x => TIO.succeed(x + "1"))), "error1");
+        assert.equal(await runtime.safeRunUnion(TIO.fail("error").flatMapError((x) => TIO.succeed(x + "1"))), "error1");
     });
 
     it("tap", async () => {
         let count = 0;
-        const effect = TIO.succeed(1).tap(x => TIO.succeed(count = x));
+        const effect = TIO.succeed(1).tap((x) => TIO.succeed((count = x)));
         assert.equal(await runtime.unsafeRun(effect), 1);
         assert.equal(count, 1);
     });
 
     it("tapError", async () => {
         let error = "";
-        const effect = TIO.fail("error").tapError(e => TIO.succeed(error = e));
+        const effect = TIO.fail("error").tapError((e) => TIO.succeed((error = e)));
         assert.equal(await runtime.safeRunUnion(effect), "error");
         assert.equal(error, "error");
     });
@@ -85,14 +108,20 @@ describe("TIO", () => {
     it("tapBoth", async () => {
         let value = 0;
         let error = "";
-        const successEffect = TIO.succeed(1).tapBoth(x => TIO.succeed(value = x), e => TIO.succeed(error = e));
+        const successEffect = TIO.succeed(1).tapBoth(
+            (x) => TIO.succeed((value = x)),
+            (e) => TIO.succeed((error = e))
+        );
         assert.equal(await runtime.unsafeRun(successEffect), 1);
         assert.equal(value, 1);
         assert.equal(error, "");
 
         value = 0;
         error = "";
-        const failEffect = TIO.fail("error").tapBoth(x => TIO.succeed(value = x), e => TIO.succeed(error = e));
+        const failEffect = TIO.fail("error").tapBoth(
+            (x) => TIO.succeed((value = x)),
+            (e) => TIO.succeed((error = e))
+        );
         assert.equal(await runtime.safeRunUnion(failEffect), "error");
         assert.equal(value, 0);
         assert.equal(error, "error");
@@ -110,18 +139,50 @@ describe("TIO", () => {
     });
 
     it("flipWith", async () => {
-        assert.equal(await runtime.safeRunUnion(TIO.fail("error").flipWith(x => x.map(x => x + "1"))), "error1");
-        assert.equal(await runtime.unsafeRun(TIO.succeed(1).flipWith(x => x.mapError(x => x + 1))), 2);
+        assert.equal(await runtime.safeRunUnion(TIO.fail("error").flipWith((x) => x.map((x) => x + "1"))), "error1");
+        assert.equal(await runtime.unsafeRun(TIO.succeed(1).flipWith((x) => x.mapError((x) => x + 1))), 2);
     });
 
     it("foldM", async () => {
-        assert.equal(await runtime.unsafeRun(TIO.succeed(1).foldM(x => TIO.succeed(x + 1), x => TIO.succeed(x + 2))), 3);
-        assert.equal(await runtime.safeRunUnion(TIO.fail("error").foldM(x => TIO.succeed(x + "1"), x => TIO.succeed(x + "2"))), "error1");
+        assert.equal(
+            await runtime.unsafeRun(
+                TIO.succeed(1).foldM(
+                    (x) => TIO.succeed(x + 1),
+                    (x) => TIO.succeed(x + 2)
+                )
+            ),
+            3
+        );
+        assert.equal(
+            await runtime.safeRunUnion(
+                TIO.fail("error").foldM(
+                    (x) => TIO.succeed(x + "1"),
+                    (x) => TIO.succeed(x + "2")
+                )
+            ),
+            "error1"
+        );
     });
 
     it("fold", async () => {
-        assert.equal(await runtime.unsafeRun(TIO.succeed(1).fold(x => x + 1, x => x + 2)), 3);
-        assert.equal(await runtime.safeRunUnion(TIO.fail("error").fold(x => x + "1", x => x + "2")), "error1");
+        assert.equal(
+            await runtime.unsafeRun(
+                TIO.succeed(1).fold(
+                    (x) => x + 1,
+                    (x) => x + 2
+                )
+            ),
+            3
+        );
+        assert.equal(
+            await runtime.safeRunUnion(
+                TIO.fail("error").fold(
+                    (x) => x + "1",
+                    (x) => x + "2"
+                )
+            ),
+            "error1"
+        );
     });
 
     it("absolve", async () => {
@@ -181,26 +242,29 @@ describe("TIO", () => {
 
     it("ensuring", async () => {
         let finalizerRan = false;
-        const successEffect = TIO.succeed(1).ensuring(TIO.succeed(finalizerRan = true));
+        const successEffect = TIO.succeed(1).ensuring(TIO.succeed((finalizerRan = true)));
         assert.equal(await runtime.unsafeRun(successEffect), 1);
         assert.isTrue(finalizerRan);
 
         finalizerRan = false;
-        const failEffect = TIO.fail("error").ensuring(TIO.succeed(finalizerRan = true));
+        const failEffect = TIO.fail("error").ensuring(TIO.succeed((finalizerRan = true)));
         assert.equal(await runtime.safeRunUnion(failEffect), "error");
         assert.isTrue(finalizerRan);
     });
 
     it("retry", async () => {
         let count = 0;
-        const p1 = TIO.fromPromise(() => new Promise((resolve, reject) => {
-            count++;
-            if (count < 3) {
-                reject("error");
-            } else {
-                resolve(1);
-            }
-        }));
+        const p1 = TIO.fromPromise(
+            () =>
+                new Promise((resolve, reject) => {
+                    count++;
+                    if (count < 3) {
+                        reject("error");
+                    } else {
+                        resolve(1);
+                    }
+                })
+        );
         assert.equal(await runtime.safeRunUnion(p1.retry(0)), "error");
         count = 0;
         assert.equal(await runtime.safeRunUnion(p1.retry(1)), "error");
@@ -211,9 +275,9 @@ describe("TIO", () => {
     });
 
     it("race", async () => {
-        const p1 = TIO.fromPromise(() => new Promise(resolve => setTimeout(() => resolve(1), 100)));
-        const p2 = TIO.fromPromise(() => new Promise(resolve => setTimeout(() => resolve(2), 200)));
-        const p3 = TIO.fromPromise(() => new Promise(resolve => setTimeout(() => resolve(3), 300)));
+        const p1 = TIO.fromPromise(() => new Promise((resolve) => setTimeout(() => resolve(1), 100)));
+        const p2 = TIO.fromPromise(() => new Promise((resolve) => setTimeout(() => resolve(2), 200)));
+        const p3 = TIO.fromPromise(() => new Promise((resolve) => setTimeout(() => resolve(3), 300)));
 
         assert.equal(await runtime.unsafeRun(p1.race(p2)), 1);
         assert.equal(await runtime.unsafeRun(p2.race(p1)), 1);
@@ -229,16 +293,20 @@ describe("TIO", () => {
         assert.equal(await runtime.unsafeRun(TIO.race(p1, p2, p3)), 1);
         assert.equal(await runtime.unsafeRun(TIO.race(p3, p2, p1)), 1);
 
-        const p4 = TIO.fromPromise(() => new Promise(resolve => {
-            for (let i = 0; i < 1; i++) {
-            }
-            resolve(1);
-        }));
-        const p5 = TIO.fromPromise(() => new Promise(resolve => {
-            for (let i = 0; i < 1000000; i++) {
-            }
-            resolve(2);
-        }));
+        const p4 = TIO.fromPromise(
+            () =>
+                new Promise((resolve) => {
+                    for (let i = 0; i < 1; i++) {}
+                    resolve(1);
+                })
+        );
+        const p5 = TIO.fromPromise(
+            () =>
+                new Promise((resolve) => {
+                    for (let i = 0; i < 1000000; i++) {}
+                    resolve(2);
+                })
+        );
         assert.equal(await runtime.unsafeRun(p4.race(p5)), 1);
         // Note: p5 resolves to 2 because synchronous operations in Promise executors run to completion
         // before any other code executes. Since p5 is called first, its for-loop completes before p4 starts.
@@ -247,20 +315,23 @@ describe("TIO", () => {
     });
 
     it("timeout", async () => {
-        const p1 = TIO.fromPromise(() => new Promise(resolve => setTimeout(() => resolve(1), 1000)));
+        const p1 = TIO.fromPromise(() => new Promise((resolve) => setTimeout(() => resolve(1), 1000)));
         assert.equal(await runtime.safeRunUnion(p1.timeout(500)), null);
         assert.equal(await runtime.unsafeRun(p1.timeout(1500)), 1);
 
         // Note: Synchronous for-loops in Promise executors cannot be interrupted by timeout
         // because JavaScript is single-threaded. The loop runs to completion before any
         // timeout callback can execute. This is a fundamental limitation of JavaScript.
-        const p2 = TIO.fromPromise(() => new Promise(resolve => {
-            for (let i = 0; i < 1000000; i++) {
-                if (i === 999999) {
-                    resolve(i);
-                }
-            }
-        }));
+        const p2 = TIO.fromPromise(
+            () =>
+                new Promise((resolve) => {
+                    for (let i = 0; i < 1000000; i++) {
+                        if (i === 999999) {
+                            resolve(i);
+                        }
+                    }
+                })
+        );
         // Both assertions expect the loop result (999999) since the synchronous loop
         // completes before the timeout can fire, regardless of timeout duration.
         assert.equal(await runtime.safeRunUnion(p2.timeout(10)), 999999);
@@ -284,5 +355,4 @@ describe("TIO", () => {
         const elapsed = Date.now() - start;
         assert.isTrue(elapsed >= 90); // Allow some tolerance
     });
-
 });

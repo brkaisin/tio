@@ -5,6 +5,7 @@ import {
     combineFiberExits,
     FiberContext,
     fiberFailure,
+    FiberStatusTag,
     fiberSuccess,
     InterruptedException,
     isFiberFailure,
@@ -115,8 +116,8 @@ describe("Fiber", () => {
                 .fork()
                 .flatMap((fiber) => TIO.awaitFiber(fiber));
             const result = await runtime.unsafeRun(effect);
-            assert.equal(result._tag, "Success");
-            if (result._tag === "Success") {
+            assert.isTrue(isFiberSuccess(result));
+            if (isFiberSuccess(result)) {
                 assert.equal(result.value, 42);
             }
         });
@@ -126,8 +127,8 @@ describe("Fiber", () => {
                 .fork()
                 .flatMap((fiber) => TIO.awaitFiber(fiber));
             const result = await runtime.unsafeRun(effect);
-            assert.equal(result._tag, "Failure");
-            if (result._tag === "Failure") {
+            assert.isTrue(isFiberFailure(result));
+            if (isFiberFailure(result)) {
                 assert.equal(result.cause._tag, "Fail");
             }
         });
@@ -151,7 +152,7 @@ describe("Fiber", () => {
                 .flatMap((fiber) => TIO.fiberStatus(fiber));
 
             const status = await runtime.unsafeRun(effect);
-            assert.equal(status._tag, "Running");
+            assert.equal(status._tag, FiberStatusTag.Running);
         });
 
         it("should return Done for a completed fiber", async () => {
@@ -160,9 +161,12 @@ describe("Fiber", () => {
                 .flatMap((fiber) => TIO.joinFiber(fiber).flatMap(() => TIO.fiberStatus(fiber)));
 
             const status = await runtime.unsafeRun(effect);
-            assert.equal(status._tag, "Done");
-            if (status._tag === "Done") {
-                assert.equal(status.exit._tag, "Success");
+            assert.equal(status._tag, FiberStatusTag.Done);
+            if (status._tag === FiberStatusTag.Done) {
+                assert.isTrue(isFiberSuccess(status.exit));
+                if (isFiberSuccess(status.exit)) {
+                    assert.equal(status.exit.value, 42);
+                }
             }
         });
     });
@@ -185,7 +189,7 @@ describe("Fiber", () => {
 
             const result = await runtime.unsafeRun(effect);
 
-            assert.equal(result._tag, "Failure");
+            assert.isTrue(isFiberFailure(result));
             assert.equal(completed, false);
         });
 
@@ -197,8 +201,8 @@ describe("Fiber", () => {
 
             const result = await runtime.unsafeRun(effect);
 
-            assert.equal(result._tag, "Failure");
-            if (result._tag === "Failure") {
+            assert.isTrue(isFiberFailure(result));
+            if (isFiberFailure(result)) {
                 assert.equal(result.cause._tag, "Interrupt");
             }
         });
@@ -211,8 +215,8 @@ describe("Fiber", () => {
             const result = await runtime.unsafeRun(effect);
 
             // Should be Success because it completed before interrupt
-            assert.equal(result._tag, "Success");
-            if (result._tag === "Success") {
+            assert.isTrue(isFiberSuccess(result));
+            if (isFiberSuccess(result)) {
                 assert.equal(result.value, 42);
             }
         });
@@ -270,7 +274,7 @@ describe("FiberExit helpers", () => {
     describe("fiberSuccess", () => {
         it("should create a Success exit", () => {
             const exit = fiberSuccess(42);
-            assert.equal(exit._tag, "Success");
+            assert.isTrue(isFiberSuccess(exit));
             assert.equal(exit.value, 42);
         });
     });
@@ -279,7 +283,7 @@ describe("FiberExit helpers", () => {
         it("should create a Failure exit", () => {
             const cause = causeFail("error");
             const exit = fiberFailure(cause);
-            assert.equal(exit._tag, "Failure");
+            assert.isTrue(isFiberFailure(exit));
             assert.equal(exit.cause, cause);
         });
     });
@@ -310,8 +314,8 @@ describe("FiberExit helpers", () => {
             const right = fiberSuccess("a");
             const combined = combineFiberExits(left, right);
 
-            assert.equal(combined._tag, "Success");
-            if (combined._tag === "Success") {
+            assert.isTrue(isFiberSuccess(combined));
+            if (isFiberSuccess(combined)) {
                 assert.deepEqual(combined.value, [1, "a"]);
             }
         });
@@ -321,8 +325,8 @@ describe("FiberExit helpers", () => {
             const right = fiberSuccess("a");
             const combined = combineFiberExits(left, right);
 
-            assert.equal(combined._tag, "Failure");
-            if (combined._tag === "Failure") {
+            assert.isTrue(isFiberFailure(combined));
+            if (isFiberFailure(combined)) {
                 assert.equal(combined.cause._tag, "Fail");
             }
         });
@@ -332,8 +336,8 @@ describe("FiberExit helpers", () => {
             const right = fiberFailure<string, string>(causeFail("right error"));
             const combined = combineFiberExits(left, right);
 
-            assert.equal(combined._tag, "Failure");
-            if (combined._tag === "Failure") {
+            assert.isTrue(isFiberFailure(combined));
+            if (isFiberFailure(combined)) {
                 assert.equal(combined.cause._tag, "Fail");
             }
         });
@@ -343,8 +347,8 @@ describe("FiberExit helpers", () => {
             const right = fiberFailure<string, string>(causeFail("right error"));
             const combined = combineFiberExits(left, right);
 
-            assert.equal(combined._tag, "Failure");
-            if (combined._tag === "Failure") {
+            assert.isTrue(isFiberFailure(combined));
+            if (isFiberFailure(combined)) {
                 assert.equal(combined.cause._tag, "Both");
             }
         });
@@ -361,14 +365,14 @@ describe("FiberContext", () => {
     it("should start in Running state", () => {
         const fiber = new FiberContext();
         const status = fiber.unsafeStatus();
-        assert.equal(status._tag, "Running");
+        assert.equal(status._tag, FiberStatusTag.Running);
     });
 
     it("should transition to Done after done() is called", () => {
         const fiber = new FiberContext<never, number>();
         fiber.done(fiberSuccess(42));
         const status = fiber.unsafeStatus();
-        assert.equal(status._tag, "Done");
+        assert.equal(status._tag, FiberStatusTag.Done);
     });
 
     it("should notify observers when done", () => {
@@ -423,7 +427,7 @@ describe("FiberContext", () => {
         assert.equal(callCount, 1);
 
         const status = fiber.unsafeStatus();
-        if (status._tag === "Done" && status.exit._tag === "Success") {
+        if (status._tag === FiberStatusTag.Done && isFiberSuccess(status.exit)) {
             assert.equal(status.exit.value, 42); // First value wins
         }
     });
@@ -434,7 +438,6 @@ describe("InterruptedException", () => {
         const fiberId = { id: 42, startTime: 1000 };
         const exception = new InterruptedException(fiberId);
 
-        assert.equal(exception._tag, "InterruptedException");
         assert.equal(exception.fiberId, fiberId);
         assert.equal(exception.name, "InterruptedException");
         assert.include(exception.message, "42");

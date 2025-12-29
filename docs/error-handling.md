@@ -67,20 +67,23 @@ const parseJson = (s: string): TIO<never, never, object> =>
 When a fiber completes with a failure, the `FiberExit` contains a `Cause`:
 
 ```typescript
-type FiberExit<E, A> =
-    | { _tag: "Success"; value: A }
-    | { _tag: "Failure"; cause: Cause<E> }
+type FiberSuccess<A> = { readonly _tag: FiberTag.Success; readonly value: A };
+type FiberFailure<E> = { readonly _tag: FiberTag.Failure; readonly cause: Cause<E> };
+
+export type FiberExit<E, A> = FiberSuccess<A> | FiberFailure<E>;
 ```
 
 Example:
 
 ```typescript
-const exit = await runtime.unsafeRun(
+import {isFiberFailure} from "./fiber";
+
+const fiberExit = await runtime.unsafeRun(
     TIO.fail("oops").fork().flatMap((f) => TIO.awaitFiber(f))
 );
 
-if (exit._tag === "Failure") {
-    console.log(exit.cause);
+if (isFiberFailure(fiberExit)) {
+    console.log(fiberExit.cause);
     // { _tag: "Fail", error: "oops" }
 }
 ```
@@ -203,13 +206,15 @@ squash(cause); // "error" (failures take priority)
 ### Pattern 1: Inspect Exit Value
 
 ```typescript
-const result = await runtime.unsafeRun(
+import {isFiberFailure} from "./fiber";
+
+const fiberExit = await runtime.unsafeRun(
     effect.fork().flatMap((f) => TIO.awaitFiber(f))
 );
 
-if (result._tag === "Failure") {
-    const cause = result.cause;
-    
+if (isFiberFailure(fiberExit)) {
+    const cause = fiberExit.cause;
+
     if (isInterrupted(cause)) {
         console.log("Operation was cancelled");
     } else if (isDie(cause)) {
@@ -262,6 +267,7 @@ function causeToMessage<E>(cause: Cause<E>): string {
 import { TIO } from "tio/tio";
 import { Runtime } from "tio/runtime";
 import { failures, defects, isInterrupted, prettyPrint } from "tio/cause";
+import { isFiberSuccess } from "./fiber";
 
 const runtime = Runtime.default;
 
@@ -290,7 +296,7 @@ const program = riskyOperation
     .flatMap((fiber) => TIO.awaitFiber(fiber));
 
 runtime.unsafeRun(program).then((exit) => {
-    if (exit._tag === "Success") {
+    if (isFiberSuccess(exit)) {
         console.log("Result:", exit.value);
     } else {
         console.log("Failure cause:", prettyPrint(exit.cause));

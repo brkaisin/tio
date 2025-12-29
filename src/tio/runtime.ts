@@ -1,4 +1,4 @@
-import { TIO, TIOOp } from "./tio";
+import { TIO, TIOOp, TIOOpTag } from "./tio";
 import { Either, left, right } from "./util/either";
 import { identity, isNever } from "./util/functions";
 import { Has, Tag } from "./tag";
@@ -38,28 +38,28 @@ class PromiseRuntime<in R> implements Runtime<R> {
         const r = this.services as R;
 
         switch (op._tag) {
-            case "Succeed":
+            case TIOOpTag.Succeed:
                 return Promise.resolve(op.value);
 
-            case "Fail":
+            case TIOOpTag.Fail:
                 return Promise.reject(op.error);
 
-            case "Sync":
+            case TIOOpTag.Sync:
                 try {
                     return Promise.resolve(op.f(r));
                 } catch (e) {
                     return Promise.reject(e);
                 }
 
-            case "Async":
+            case TIOOpTag.Async:
                 return new Promise<A>((resolve, reject) => {
                     op.register(r, resolve, reject);
                 });
 
-            case "FlatMap":
+            case TIOOpTag.FlatMap:
                 return op.run((tio, f) => this.interpret(tio).then((z) => this.interpret(f(z))));
 
-            case "FoldM":
+            case TIOOpTag.FoldM:
                 return op.run((tio, onError, onSuccess) =>
                     this.interpret(tio).then(
                         (a1) => this.interpret(onSuccess(a1)),
@@ -71,27 +71,26 @@ class PromiseRuntime<in R> implements Runtime<R> {
             // cannot be truly "raced" - they run to completion before any other code executes.
             // This works correctly for async operations (e.g., setTimeout, fetch),
             // but synchronous CPU-bound tasks will complete in the order they are started.
-            case "Race":
+            case TIOOpTag.Race:
                 return Promise.race(op.tios.map((t) => this.interpret(t)));
 
-            case "All":
+            case TIOOpTag.All:
                 return op.run((tios) => Promise.all(tios.map((t) => this.interpret(t)))) as Promise<A>;
 
-            case "Ensuring":
+            case TIOOpTag.Ensuring:
                 return op.run((tio, finalizer) =>
                     this.interpret(tio)
                         .then((a) => this.interpret(finalizer).then(() => a))
                         .catch((e) => this.interpret(finalizer).then(() => Promise.reject(e)))
                 );
 
-            case "Sleep":
+            case TIOOpTag.Sleep:
                 return new Promise<A>((resolve) => setTimeout(() => resolve(undefined as A), op.ms));
 
-            case "Fork": {
+            case TIOOpTag.Fork: {
                 return op.run((tioToFork) => {
                     const childFiber = new FiberContext<unknown, unknown>();
 
-                    // Start the forked effect in the next microtask
                     queueMicrotask(() => {
                         this.interpret(tioToFork as TIO<R, unknown, unknown>)
                             .then((value) => childFiber.done(fiberSuccess(value)))
@@ -108,11 +107,11 @@ class PromiseRuntime<in R> implements Runtime<R> {
                 }) as Promise<A>;
             }
 
-            case "SetInterruptible":
+            case TIOOpTag.SetInterruptible:
                 // In the basic runtime, just execute the inner effect
                 return this.interpret(op.tio);
 
-            case "CheckInterrupt":
+            case TIOOpTag.CheckInterrupt:
                 // In the basic runtime, never interrupted
                 return Promise.resolve(undefined as A);
 

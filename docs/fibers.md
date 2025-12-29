@@ -138,9 +138,12 @@ const status = await runtime.unsafeRun(TIO.fiberStatus(fiber));
 A `FiberExit<E, A>` represents how a fiber completed:
 
 ```typescript
+type FiberSuccess<A> = { readonly _tag: FiberTag.Success; readonly value: A };
+type FiberFailure<E> = { readonly _tag: FiberTag.Failure; readonly cause: Cause<E> };
+
 type FiberExit<E, A> =
-    | { _tag: "Success"; value: A }        // Completed successfully
-    | { _tag: "Failure"; cause: Cause<E> } // Failed with a Cause
+    | FiberSuccess<A>        // Completed successfully
+    | FiberFailure<E> // Failed with a Cause
 ```
 
 The `Cause` in a failure provides rich information about what went wrong. See [Error Handling](./error-handling.md) for details.

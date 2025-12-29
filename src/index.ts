@@ -4,6 +4,7 @@ import { Runtime } from "./tio/runtime";
 import { Has, tag, Tag } from "./tio/tag";
 import { fold } from "./tio/util/exit";
 import { failures, isInterrupted, prettyPrint } from "./tio/cause";
+import { isFiberFailure } from "./tio/fiber";
 
 // ============================================================
 // Service Definitions
@@ -199,10 +200,10 @@ async function example5_Interruption() {
             .flatMap(() => TIO.interruptFiber(fiber))
     );
 
-    const exit = await runtime.unsafeRun(program);
-    if (exit._tag === "Failure") {
-        console.log(`Fiber exit: ${prettyPrint(exit.cause)}`);
-        console.log(`Was interrupted: ${isInterrupted(exit.cause)}`);
+    const fiberExit = await runtime.unsafeRun(program);
+    if (isFiberFailure(fiberExit)) {
+        console.log(`Fiber exit: ${prettyPrint(fiberExit.cause)}`);
+        console.log(`Was interrupted: ${isInterrupted(fiberExit.cause)}`);
     } else {
         console.log("Fiber completed successfully (unexpected)");
     }
@@ -323,15 +324,15 @@ async function example10_CauseInspection() {
 
     const program = fail1.fork().flatMap((f1) =>
         fail2.fork().flatMap((f2) =>
-            TIO.awaitFiber(f1).flatMap((exit1) =>
-                TIO.awaitFiber(f2).map((exit2) => {
+            TIO.awaitFiber(f1).flatMap((fiberExit1) =>
+                TIO.awaitFiber(f2).map((fiberExit2) => {
                     const allFailures: string[] = [];
 
-                    if (exit1._tag === "Failure") {
-                        allFailures.push(...failures(exit1.cause));
+                    if (isFiberFailure(fiberExit1)) {
+                        allFailures.push(...failures(fiberExit1.cause));
                     }
-                    if (exit2._tag === "Failure") {
-                        allFailures.push(...failures(exit2.cause));
+                    if (isFiberFailure(fiberExit2)) {
+                        allFailures.push(...failures(fiberExit2.cause));
                     }
 
                     return allFailures;

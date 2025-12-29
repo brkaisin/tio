@@ -367,7 +367,7 @@ export class TIO<in R, out E, out A> {
                     } else if (cause._tag === CauseTag.Die) {
                         throw cause.defect;
                     } else {
-                        reject(undefined as unknown as E);
+                        reject(undefined as E);
                     }
                 }
             });
@@ -415,7 +415,7 @@ export class TIO<in R, out E, out A> {
                         } else if (exit.cause._tag === CauseTag.Fail) {
                             reject(exit.cause.error as E);
                         } else {
-                            reject(undefined as unknown as E);
+                            reject(undefined as E);
                         }
                     });
                 }

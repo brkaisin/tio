@@ -37,14 +37,19 @@ export type FiberId = {
     readonly startTime: number;
 };
 
-let fiberIdCounter = 0;
+type FiberIdFactory = () => FiberId;
 
-export function makeFiberId(): FiberId {
-    return {
-        id: fiberIdCounter++,
-        startTime: Date.now()
+export function fiberIdFactory(): FiberIdFactory {
+    let fiberIdCounter = 0;
+    return function makeFiberId(): FiberId {
+        return {
+            id: fiberIdCounter++,
+            startTime: Date.now()
+        };
     };
 }
+
+export const makeFiberId: FiberIdFactory = fiberIdFactory();
 
 export const empty: Cause<never> = { _tag: CauseTag.Empty };
 

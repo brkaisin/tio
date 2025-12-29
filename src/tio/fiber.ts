@@ -59,51 +59,51 @@ export interface Fiber<E, A> {
  */
 export class FiberContext<E, A> implements Fiber<E, A> {
     readonly id: FiberId;
-    private _status: FiberStatus<E, A>;
-    private _observers: Array<(exit: FiberExit<E, A>) => void>;
-    private _interrupted: boolean;
-    private _interruptible: boolean;
+    private status: FiberStatus<E, A>;
+    private observers: Array<(exit: FiberExit<E, A>) => void>;
+    private interrupted: boolean;
+    private interruptible: boolean;
 
     constructor() {
         this.id = makeFiberId();
-        this._status = { _tag: FiberStatusTag.Running };
-        this._observers = [];
-        this._interrupted = false;
-        this._interruptible = true;
+        this.status = { _tag: FiberStatusTag.Running };
+        this.observers = [];
+        this.interrupted = false;
+        this.interruptible = true;
     }
 
     done(exit: FiberExit<E, A>): void {
-        if (this._status._tag === FiberStatusTag.Done) return;
-        this._status = { _tag: FiberStatusTag.Done, exit };
-        const observers = this._observers;
-        this._observers = [];
+        if (this.status._tag === FiberStatusTag.Done) return;
+        this.status = { _tag: FiberStatusTag.Done, exit };
+        const observers = this.observers;
+        this.observers = [];
         for (const observer of observers) {
             observer(exit);
         }
     }
 
     unsafeAddObserver(callback: (exit: FiberExit<E, A>) => void): () => void {
-        if (this._status._tag === FiberStatusTag.Done) {
-            callback(this._status.exit);
+        if (this.status._tag === FiberStatusTag.Done) {
+            callback(this.status.exit);
             return () => {};
         }
-        this._observers.push(callback);
+        this.observers.push(callback);
         return () => {
-            const idx = this._observers.indexOf(callback);
-            if (idx >= 0) this._observers.splice(idx, 1);
+            const idx = this.observers.indexOf(callback);
+            if (idx >= 0) this.observers.splice(idx, 1);
         };
     }
 
     unsafeInterrupt(): void {
-        if (this._interrupted) return;
-        this._interrupted = true;
-        if (this._interruptible && this._status._tag !== FiberStatusTag.Done) {
+        if (this.interrupted) return;
+        this.interrupted = true;
+        if (this.interruptible && this.status._tag !== FiberStatusTag.Done) {
             this.done(fiberFailure(causeInterrupt(this.id)));
         }
     }
 
     unsafeStatus(): FiberStatus<E, A> {
-        return this._status;
+        return this.status;
     }
 }
 
@@ -121,11 +121,11 @@ export class InterruptedException extends Error {
  * Utility to combine two FiberExits.
  */
 export function combineFiberExits<E, A, B>(left: FiberExit<E, A>, right: FiberExit<E, B>): FiberExit<E, [A, B]> {
-    if (left._tag === FiberTag.Success && right._tag === FiberTag.Success) {
+    if (isFiberSuccess(left) && isFiberSuccess(right)) {
         return fiberSuccess([left.value, right.value]);
-    } else if (left._tag === FiberTag.Failure && right._tag === FiberTag.Failure) {
+    } else if (isFiberFailure(left) && isFiberFailure(right)) {
         return fiberFailure(both(left.cause, right.cause));
-    } else if (left._tag === FiberTag.Failure) {
+    } else if (isFiberFailure(left)) {
         return fiberFailure(left.cause);
     } else {
         return fiberFailure((right as { cause: Cause<E> }).cause);

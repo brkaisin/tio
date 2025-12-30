@@ -397,7 +397,7 @@ export class TIO<in R, out E, out A> {
      * Race effects with proper cancellation of losers.
      */
     static raceFirst<R, E, A>(...tios: Array<TIO<R, E, A>>): TIO<R, E, A> {
-        if (tios.length === 0) return TIO.never as TIO<R, E, A>;
+        if (tios.length === 0) return TIO.never;
         if (tios.length === 1) return tios[0];
 
         return TIO.forkAll(tios).flatMap((fibers) =>
@@ -411,9 +411,9 @@ export class TIO<in R, out E, out A> {
                         for (const f of fibers) if (f !== fiber) f.unsafeInterrupt();
 
                         if (isFiberSuccess(exit)) {
-                            resolve(exit.value as A);
+                            resolve(exit.value);
                         } else if (exit.cause._tag === CauseTag.Fail) {
-                            reject(exit.cause.error as E);
+                            reject(exit.cause.error);
                         } else {
                             reject(undefined as E);
                         }

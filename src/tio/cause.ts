@@ -25,10 +25,6 @@ export type Cause<E> =
     | { readonly _tag: CauseTag.Then; readonly left: Cause<E>; readonly right: Cause<E> }
     | { readonly _tag: CauseTag.Both; readonly left: Cause<E>; readonly right: Cause<E> };
 
-export function isCauseFail<E>(cause: Cause<E>): cause is { readonly _tag: CauseTag.Fail; readonly error: E } {
-    return cause._tag === CauseTag.Fail;
-}
-
 /**
  * A unique identifier for a Fiber.
  */

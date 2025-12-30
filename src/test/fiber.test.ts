@@ -176,7 +176,7 @@ describe("Fiber", () => {
             let completed = false;
 
             const longRunning = TIO.succeed(undefined)
-                .delay(1000)
+                .delay(100)
                 .tap(() =>
                     TIO.make(() => {
                         completed = true;
@@ -188,8 +188,10 @@ describe("Fiber", () => {
                 .flatMap((fiber) => TIO.sleep(10).flatMap(() => TIO.interruptFiber(fiber)));
 
             const result = await runtime.unsafeRun(effect);
-
             assert.isTrue(isFiberFailure(result));
+
+            // Give a bit of time for the slow one to potentially complete
+            await new Promise((r) => setTimeout(r, 200));
             assert.equal(completed, false);
         });
 
@@ -246,7 +248,7 @@ describe("Fiber", () => {
             await runtime.unsafeRun(TIO.raceFirst(fast, slow));
 
             // Give a bit of time for the slow one to potentially complete
-            await new Promise((r) => setTimeout(r, 50));
+            await new Promise((r) => setTimeout(r, 200));
 
             assert.equal(slowCompleted, false);
         });

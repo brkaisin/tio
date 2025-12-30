@@ -143,7 +143,5 @@ const union = await runtime.safeRunUnion(effect);
 ## Next Steps
 
 - [Core Concepts](./core-concepts.md) - Deep dive into TIO's design
-- [Fibers](./fibers.md) - Concurrent execution with fibers
-- [Error Handling](./error-handling.md) - Advanced error handling with Cause
 - [Dependency Injection](./dependency-injection.md) - Managing dependencies with the environment
 

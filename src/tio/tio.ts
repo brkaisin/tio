@@ -422,4 +422,26 @@ export class TIO<in R, out E, out A> {
             })
         );
     }
+
+    // alternative implementation of raceFirst supposed to be equivalent but would need testing
+    static raceFirst2<R, E, A>(...tios: Array<TIO<R, E, A>>): TIO<R, E, A> {
+        if (tios.length === 0) return TIO.never;
+        if (tios.length === 1) return tios[0];
+
+        return TIO.forkAll(tios).flatMap((fibers) =>
+            TIO.race(
+                ...fibers.map((fiber) =>
+                    TIO.awaitFiber(fiber).flatMap((exit) =>
+                        TIO.all(...fibers.filter((f) => f !== fiber).map(TIO.interruptFiber)).flatMap(() =>
+                            isFiberSuccess(exit)
+                                ? TIO.succeed(exit.value)
+                                : exit.cause._tag === CauseTag.Fail
+                                  ? TIO.fail(exit.cause.error)
+                                  : TIO.fail(undefined as E)
+                        )
+                    )
+                )
+            )
+        );
+    }
 }

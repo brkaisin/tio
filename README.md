@@ -18,8 +18,6 @@ attempt to create a useful library. But who knows, maybe it will find its place 
 |----------|-------------|
 | [Getting Started](./docs/getting-started.md) | Quick introduction and basic usage |
 | [Core Concepts](./docs/core-concepts.md) | Deep dive into TIO's design and operations |
-| [Fibers](./docs/fibers.md) | Concurrent execution with lightweight virtual threads |
-| [Error Handling](./docs/error-handling.md) | Rich error information with Cause |
 | [Dependency Injection](./docs/dependency-injection.md) | Type-safe dependency management |
 
 ## What is a functional effect system?
@@ -99,33 +97,6 @@ const log = (msg: string): TIO<{ Logger: Logger }, never, void> =>
 
 // Runtime must provide Logger
 const runtime = Runtime.default.provideService(LoggerTag, myLogger);
-```
-
-### Concurrent Execution with Fibers
-
-Fork effects to run concurrently:
-
-```typescript
-const program = TIO.succeed(42)
-    .delay(100)
-    .fork()
-    .flatMap((fiber) => TIO.joinFiber(fiber));
-```
-
-### Rich Error Information
-
-Causes capture the complete failure story:
-
-```typescript
-import { prettyPrint } from "tio/cause";
-
-const exit = await runtime.unsafeRun(
-    effect.fork().flatMap((f) => TIO.awaitFiber(f))
-);
-
-if (exit._tag === "Failure") {
-    console.log(prettyPrint(exit.cause));
-}
 ```
 
 ## Running Tests

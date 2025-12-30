@@ -189,5 +189,7 @@ const customRuntime = Runtime.default
 
 ## Next Steps
 
+- [Fibers](./fibers.md) - Concurrent execution
+- [Error Handling](./error-handling.md) - Rich error types with Cause
 - [Dependency Injection](./dependency-injection.md) - Managing the environment
 

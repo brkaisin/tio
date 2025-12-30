@@ -3,6 +3,8 @@ import { URIO } from "./tio/aliases";
 import { Runtime } from "./tio/runtime";
 import { Has, tag, Tag } from "./tio/tag";
 import { fold } from "./tio/util/exit";
+import { failures, isInterrupted, prettyPrint } from "./tio/cause";
+import { isFiberFailure } from "./tio/fiber";
 
 // ============================================================
 // Service Definitions
@@ -94,6 +96,117 @@ async function example1_BasicQueryWithRetry() {
         (error) => console.log(`Program encountered this error: ${error}`),
         (value) => console.log(`Program exited successfully with ${value}`)
     );
+}
+
+// ============================================================
+// Example 2: Concurrent Fibers
+// ============================================================
+
+async function example2_ConcurrentFibers() {
+    console.log("\n" + "=".repeat(60));
+    console.log("Example 2: Concurrent Fibers");
+    console.log("=".repeat(60));
+
+    const task = (name: string, ms: number) =>
+        log(`[${name}] Starting...`)
+            .flatMap(() => TIO.sleep(ms))
+            .flatMap(() => log(`[${name}] Completed after ${ms}ms`))
+            .map(() => name);
+
+    const program = task("Task A", 100)
+        .fork()
+        .flatMap((fiberA) =>
+            task("Task B", 50)
+                .fork()
+                .flatMap((fiberB) =>
+                    task("Task C", 75)
+                        .fork()
+                        .flatMap((fiberC) =>
+                            TIO.joinFiber(fiberA).flatMap((a) =>
+                                TIO.joinFiber(fiberB).flatMap((b) => TIO.joinFiber(fiberC).map((c) => [a, b, c]))
+                            )
+                        )
+                )
+        );
+
+    const start = Date.now();
+    const results = await runtime.unsafeRun(program);
+    const elapsed = Date.now() - start;
+
+    console.log(`All tasks completed: ${results.join(", ")}`);
+    console.log(`Total time: ${elapsed}ms (concurrent, not sequential ~225ms)`);
+}
+
+// ============================================================
+// Example 3: Racing Effects
+// ============================================================
+
+async function example3_Racing() {
+    console.log("\n" + "=".repeat(60));
+    console.log("Example 3: Racing Effects");
+    console.log("=".repeat(60));
+
+    const fast = log("Fast task starting").flatMap(() => TIO.sleep(50).map(() => "fast wins!"));
+
+    const slow = log("Slow task starting").flatMap(() => TIO.sleep(200).map(() => "slow wins!"));
+
+    const winner = await runtime.unsafeRun(TIO.raceFirst(fast, slow));
+    console.log(`Winner: ${winner}`);
+}
+
+// ============================================================
+// Example 4: Timeout Pattern
+// ============================================================
+
+async function example4_Timeout() {
+    console.log("\n" + "=".repeat(60));
+    console.log("Example 4: Timeout Pattern");
+    console.log("=".repeat(60));
+
+    function withTimeout<R, E, A>(effect: TIO<R, E, A>, ms: number, timeoutError: E): TIO<R, E, A> {
+        const timeout = TIO.sleep(ms).flatMap(() => TIO.fail(timeoutError)) as TIO<R, E, A>;
+        return TIO.raceFirst(effect, timeout);
+    }
+
+    const slowOperation = log("Starting slow operation...")
+        .flatMap(() => TIO.sleep(500))
+        .map(() => "completed");
+
+    const result = await runtime.safeRunEither(withTimeout(slowOperation, 100, "Operation timed out!"));
+
+    if ("right" in result) {
+        console.log(`Success: ${result.right}`);
+    } else {
+        console.log(`Timeout: ${result.left}`);
+    }
+}
+
+// ============================================================
+// Example 5: Fiber Interruption
+// ============================================================
+
+async function example5_Interruption() {
+    console.log("\n" + "=".repeat(60));
+    console.log("Example 5: Fiber Interruption");
+    console.log("=".repeat(60));
+
+    const longRunning = log("Long task started")
+        .flatMap(() => TIO.sleep(10000))
+        .flatMap(() => log("Long task completed")); // This won't print
+
+    const program = longRunning.fork().flatMap((fiber) =>
+        TIO.sleep(100)
+            .flatMap(() => log("Interrupting fiber..."))
+            .flatMap(() => TIO.interruptFiber(fiber))
+    );
+
+    const fiberExit = await runtime.unsafeRun(program);
+    if (isFiberFailure(fiberExit)) {
+        console.log(`Fiber exit: ${prettyPrint(fiberExit.cause)}`);
+        console.log(`Was interrupted: ${isInterrupted(fiberExit.cause)}`);
+    } else {
+        console.log("Fiber completed successfully (unexpected)");
+    }
 }
 
 // ============================================================
@@ -194,6 +307,42 @@ async function example9_FoldM() {
 
     const result = await Runtime.default.unsafeRun(program);
     console.log(result);
+}
+
+// ============================================================
+// Example 10: Rich Error Cause Inspection
+// ============================================================
+
+async function example10_CauseInspection() {
+    console.log("\n" + "=".repeat(60));
+    console.log("Example 10: Rich Error Cause Inspection");
+    console.log("=".repeat(60));
+
+    // Simulate parallel failures
+    const fail1 = TIO.fail("Database connection failed");
+    const fail2 = TIO.fail("Cache connection failed");
+
+    const program = fail1.fork().flatMap((f1) =>
+        fail2.fork().flatMap((f2) =>
+            TIO.awaitFiber(f1).flatMap((fiberExit1) =>
+                TIO.awaitFiber(f2).map((fiberExit2) => {
+                    const allFailures: string[] = [];
+
+                    if (isFiberFailure(fiberExit1)) {
+                        allFailures.push(...failures(fiberExit1.cause));
+                    }
+                    if (isFiberFailure(fiberExit2)) {
+                        allFailures.push(...failures(fiberExit2.cause));
+                    }
+
+                    return allFailures;
+                })
+            )
+        )
+    );
+
+    const errors = await Runtime.default.unsafeRun(program);
+    console.log("All errors collected:", errors);
 }
 
 // ============================================================
@@ -308,6 +457,46 @@ async function example13_Pipeline() {
 }
 
 // ============================================================
+// Example 14: Fiber Supervision (Background Workers)
+// ============================================================
+
+async function example14_FiberSupervision() {
+    console.log("\n" + "=".repeat(60));
+    console.log("Example 14: Fiber Supervision (Background Workers)");
+    console.log("=".repeat(60));
+
+    const worker = (id: number, iterations: number): TIO<Env, never, void> => {
+        const work = (i: number): TIO<Env, never, void> =>
+            i >= iterations
+                ? log(`  Worker ${id}: Done!`)
+                : log(`  Worker ${id}: Processing item ${i + 1}/${iterations}`)
+                      .flatMap(() => TIO.sleep(30))
+                      .flatMap(() => work(i + 1));
+        return work(0);
+    };
+
+    const program = log("Supervisor: Starting workers...")
+        .flatMap(() => worker(1, 3).fork())
+        .flatMap((w1) =>
+            worker(2, 4)
+                .fork()
+                .flatMap((w2) =>
+                    worker(3, 2)
+                        .fork()
+                        .flatMap((w3) =>
+                            log("Supervisor: All workers started, waiting for completion...")
+                                .flatMap(() => TIO.awaitFiber(w1))
+                                .flatMap(() => TIO.awaitFiber(w2))
+                                .flatMap(() => TIO.awaitFiber(w3))
+                                .flatMap(() => log("Supervisor: All workers completed!"))
+                        )
+                )
+        );
+
+    await runtime.unsafeRun(program);
+}
+
+// ============================================================
 // Example 15: Either-based Error Handling (mapBoth, absolve)
 // ============================================================
 
@@ -348,13 +537,19 @@ async function main() {
     console.log("=".repeat(60));
 
     await example1_BasicQueryWithRetry();
+    await example2_ConcurrentFibers();
+    await example3_Racing();
+    await example4_Timeout();
+    await example5_Interruption();
     await example6_ErrorRecovery();
     await example7_ResourceCleanup();
     await example8_CombiningEffects();
     await example9_FoldM();
+    await example10_CauseInspection();
     await example11_ParallelFetching();
     await example12_ExponentialBackoff();
     await example13_Pipeline();
+    await example14_FiberSupervision();
     await example15_EitherPatterns();
 
     console.log("\n" + "=".repeat(60));

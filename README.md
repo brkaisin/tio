@@ -14,6 +14,8 @@ attempt to create a useful library. But who knows, maybe it will find its place 
 
 ## Documentation
 
+The documentation is available on the [TIO website](https://brkaisin.github.io/tio/), and in the `docs` folder:
+
 | Document | Description |
 |----------|-------------|
 | [Getting Started](./docs/getting-started.md) | Quick introduction and basic usage |

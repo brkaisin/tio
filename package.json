@@ -2,6 +2,7 @@
     "name": "tio",
     "version": "0.0.1",
     "description": "A ridiculously simple, zero-dependency functional effect system for TypeScript",
+    "homepage": "https://brkaisin.github.io/tio/",
     "main": "index.js",
     "types": "dist/index.d.ts",
     "files": [

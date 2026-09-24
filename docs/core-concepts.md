@@ -124,6 +124,9 @@ const customRuntime = Runtime.default
 | `safeRunEither` | `Promise<Either<E, A>>` | Returns Left/Right |
 | `safeRunExit` | `Promise<Exit<E, A>>` | Returns success/failure |
 | `safeRunUnion` | `Promise<E \| A>` | Returns error or value |
+| `unsafeRunFiber` | `Fiber<E, A>` | Returns the running root fiber (see [Fibers](./fibers.md)) |
+
+Defects (thrown exceptions) and interruptions are not part of `E`: they always reject the returned Promise.
 
 ## Effect Operations
 
@@ -156,6 +159,7 @@ const customRuntime = Runtime.default
 |-----------|-------------|
 | `.orElse(that)` | Fallback on error |
 | `.foldM(onErr, onSucc)` | Handle both cases with effects |
+| `.foldCauseM(onCause, onSucc)` | Same, with the full `Cause` (see [Error Handling](./error-handling.md)) |
 | `.fold(onErr, onSucc)` | Handle both cases with functions |
 | `.retry(n)` | Retry on failure |
 | `.absolve()` | Convert `TIO<R, E, Either<E1, A>>` to `TIO<R, E \| E1, A>` |
@@ -184,7 +188,7 @@ const customRuntime = Runtime.default
 | Operation | Description |
 |-----------|-------------|
 | `.delay(ms)` | Delay execution |
-| `.timeout(ms)` | Fail if not complete in time |
+| `.timeout(ms)` | Return `null` if not complete in time (the effect is interrupted) |
 | `TIO.sleep(ms)` | Wait for duration |
 
 ## Next Steps

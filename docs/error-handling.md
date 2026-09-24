@@ -80,7 +80,7 @@ export type FiberExit<E, A> = FiberSuccess<A> | FiberFailure<E>;
 Example:
 
 ```typescript
-import {isFiberFailure} from "./fiber";
+import { isFiberFailure } from "tio/fiber";
 
 const fiberExit = await runtime.unsafeRun(
     TIO.fail("oops").fork().flatMap((f) => TIO.awaitFiber(f))
@@ -224,7 +224,7 @@ being interrupted whatever the handler returns (finalizers still run).
 ### Pattern 1: Inspect Exit Value
 
 ```typescript
-import {isFiberFailure} from "./fiber";
+import { isFiberFailure } from "tio/fiber";
 
 const fiberExit = await runtime.unsafeRun(
     effect.fork().flatMap((f) => TIO.awaitFiber(f))
@@ -285,7 +285,7 @@ function causeToMessage<E>(cause: Cause<E>): string {
 import { TIO } from "tio/tio";
 import { Runtime } from "tio/runtime";
 import { failures, defects, isInterrupted, prettyPrint } from "tio/cause";
-import { isFiberSuccess } from "./fiber";
+import { isFiberSuccess } from "tio/fiber";
 
 const runtime = Runtime.default;
 
@@ -293,8 +293,7 @@ const runtime = Runtime.default;
 const riskyOperation = TIO.make(() => {
     const rand = Math.random();
     if (rand < 0.3) throw new Error("Unexpected crash!");
-    if (rand < 0.6) return "success";
-    throw "Known error";
+    return rand < 0.6 ? "success" : "failure";
 }).flatMap((result) =>
     result === "success" 
         ? TIO.succeed(result)

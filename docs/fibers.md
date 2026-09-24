@@ -7,7 +7,7 @@ Fibers are TIO's mechanism for concurrent execution. This guide explains what fi
 Fibers are **lightweight virtual threads** that enable concurrent execution of effects. Unlike OS threads, fibers are:
 
 - **Cheap to create**: You can spawn thousands of fibers without significant overhead
-- **Cooperatively scheduled**: Fibers yield control at async boundaries (like `await` points)
+- **Cooperatively scheduled**: Fibers yield control at async boundaries (like `await` points), and regularly during long synchronous work
 - **Interruptible**: A fiber can be cancelled from the outside
 
 ## Concurrency vs Parallelism
@@ -154,7 +154,7 @@ The `Cause` in a failure provides rich information about what went wrong. See [E
 
 | Method | Behavior |
 |--------|----------|
-| `TIO.joinFiber(fiber)` | Waits for the fiber and **propagates** its result. If the fiber failed, the failure is re-thrown. |
+| `TIO.joinFiber(fiber)` | Waits for the fiber and **propagates** its result. If the fiber failed, the failure is re-thrown (and if it was interrupted, the joining fiber is interrupted too). |
 | `TIO.awaitFiber(fiber)` | Waits for the fiber and **returns** its `FiberExit`. Failures are not propagated—you get the full exit value to inspect. |
 
 ```typescript
@@ -216,7 +216,7 @@ Fiber execution:
 
 This means:
 - A **single synchronous step** (e.g. a `TIO.make` callback) cannot be interrupted in the middle of its execution
-- Everything between steps, including async operations, is interruptible
+- Everything between steps, including async operations, is interruptible (unless in an uninterruptible region, see below)
 - An interrupted fiber cannot "recover": `foldM`, `orElse`, etc. do not catch interruptions
 
 ```typescript
@@ -251,7 +251,7 @@ is deferred until the region is exited.
 ```typescript
 const transfer = withdraw(from, amount)
     .flatMap(() => deposit(to, amount))
-    .uninterruptible(); // either both happen, or none
+    .uninterruptible(); // can't be interrupted between the withdrawal and the deposit
 ```
 
 `TIO.uninterruptibleMask` runs an effect uninterruptibly, while allowing some parts to be interrupted again with
@@ -268,6 +268,12 @@ const bracket = <R, E, A, B>(
 ```
 
 Forked fibers always start interruptible, even when forked from an uninterruptible region.
+
+### Fiber Lifetime
+
+A forked fiber is independent from the fiber that forked it: it keeps running when its parent completes or is
+interrupted. If you fork fibers manually, make sure to join or interrupt them (e.g. in a finalizer).
+`TIO.race`, `TIO.all` and `timeout` take care of that for you: the fibers they start never outlive them.
 
 ### Cancellable Async Operations
 
@@ -377,28 +383,13 @@ const fetchUser = TIO.succeed({ id: 1, name: "Alice" }).delay(100);
 const fetchOrders = TIO.succeed([{ id: 101 }, { id: 102 }]).delay(150);
 const fetchRecommendations = TIO.succeed(["item1", "item2"]).delay(80);
 
-// Fetch all data concurrently with a 200ms timeout
-// Fork each effect individually to preserve types
-const fetchDashboardData = fetchUser.fork().flatMap((userFiber) =>
-    fetchOrders.fork().flatMap((ordersFiber) =>
-        fetchRecommendations.fork().flatMap((recsFiber) => {
-            return TIO.race(
-                // Wait for all to complete
-                TIO.joinFiber(userFiber).flatMap((user) =>
-                    TIO.joinFiber(ordersFiber).flatMap((orders) =>
-                        TIO.joinFiber(recsFiber).map((recommendations) => ({
-                            user,
-                            orders,
-                            recommendations
-                        }))
-                    )
-                ),
-                // Or timeout after 200ms
-                TIO.sleep(200).flatMap(() => TIO.fail("Dashboard load timeout" as const))
-            );
-        })
-    )
-);
+// Fetch all data concurrently (zip uses TIO.all), with a 200ms timeout.
+// On timeout, all the pending fetches are interrupted.
+const fetchDashboardData = fetchUser
+    .zip(fetchOrders)
+    .zip(fetchRecommendations)
+    .map(([[user, orders], recommendations]) => ({ user, orders, recommendations }))
+    .race(TIO.sleep(200).flatMap(() => TIO.fail("Dashboard load timeout" as const)));
 
 runtime.safeRunEither(fetchDashboardData).then((result) => {
     if (isRight(result)) {

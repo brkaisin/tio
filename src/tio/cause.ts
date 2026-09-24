@@ -101,6 +101,11 @@ export function isInterrupted<E>(cause: Cause<E>): boolean {
     }
 }
 
+/** True if the cause only contains interruptions (no failures nor defects). */
+export function isInterruptedOnly<E>(cause: Cause<E>): boolean {
+    return isInterrupted(cause) && !isFailure(cause) && !isDie(cause);
+}
+
 export function isDie<E>(cause: Cause<E>): boolean {
     switch (cause._tag) {
         case CauseTag.Die:

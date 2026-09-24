@@ -3,7 +3,7 @@ import { TIO } from "../tio/tio";
 import { Runtime } from "../tio/runtime";
 import {
     combineFiberExits,
-    FiberContext,
+    FiberExit,
     fiberFailure,
     FiberStatusTag,
     fiberSuccess,
@@ -11,8 +11,15 @@ import {
     isFiberFailure,
     isFiberSuccess
 } from "../tio/fiber";
-import { fail as causeFail } from "../tio/cause";
-import { isLeft, isRight } from "../tio/util/either";
+import { CauseTag, fail as causeFail, isDie, isInterrupted, isInterruptedOnly } from "../tio/cause";
+import { isLeft, isRight, left } from "../tio/util/either";
+import { UIO } from "../tio/aliases";
+
+function assertInterrupted<E, A>(exit: FiberExit<E, A>): void {
+    assert.isTrue(isFiberFailure(exit) && isInterruptedOnly(exit.cause), JSON.stringify(exit));
+}
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("Fiber", () => {
     const runtime: Runtime<never> = Runtime.default;
@@ -224,12 +231,154 @@ describe("Fiber", () => {
         });
     });
 
-    describe("raceFirst", () => {
+    describe("fiberStatus of a suspended fiber", () => {
+        it("should return Suspended for a fiber waiting on an async operation", async () => {
+            const effect = TIO.sleep(100)
+                .fork()
+                .flatMap((fiber) => TIO.sleep(10).flatMap(() => TIO.fiberStatus(fiber)));
+
+            const status = await runtime.unsafeRun(effect);
+            assert.equal(status._tag, FiberStatusTag.Suspended);
+        });
+    });
+
+    describe("interruption semantics", () => {
+        it("should cancel the pending async operation of an interrupted fiber", async () => {
+            let cancelled = false;
+            const effect = TIO.async<unknown, never, void>(() => () => {
+                cancelled = true;
+            })
+                .fork()
+                .flatMap((fiber) => TIO.sleep(10).flatMap(() => TIO.interruptFiber(fiber)));
+
+            assertInterrupted(await runtime.unsafeRun(effect));
+            assert.isTrue(cancelled);
+        });
+
+        it("should complete the interruption immediately, without waiting for sleeps", async () => {
+            const start = Date.now();
+            const effect = TIO.sleep(10_000)
+                .fork()
+                .flatMap((fiber) => TIO.sleep(10).flatMap(() => TIO.interruptFiber(fiber)));
+
+            assertInterrupted(await runtime.unsafeRun(effect));
+            assert.isBelow(Date.now() - start, 1000);
+        });
+
+        it("should run finalizers of an interrupted fiber before interruptFiber completes", async () => {
+            const log: string[] = [];
+            const effect = TIO.sleep(1000)
+                .ensuring(TIO.make(() => log.push("inner finalizer")))
+                .ensuring(TIO.sleep(20).flatMap(() => TIO.make(() => log.push("outer finalizer"))))
+                .fork()
+                .flatMap((fiber) =>
+                    TIO.sleep(10)
+                        .flatMap(() => TIO.interruptFiber(fiber))
+                        .tap(() => TIO.make(() => log.push("interrupted")))
+                );
+
+            assertInterrupted(await runtime.unsafeRun(effect));
+            assert.deepEqual(log, ["inner finalizer", "outer finalizer", "interrupted"]);
+        });
+
+        it("should not let foldM or orElse catch an interruption", async () => {
+            let recovered = false;
+            const effect = TIO.sleep(1000)
+                .orElse(TIO.make(() => (recovered = true)))
+                .fork()
+                .flatMap((fiber) => TIO.sleep(10).flatMap(() => TIO.interruptFiber(fiber)));
+
+            assertInterrupted(await runtime.unsafeRun(effect));
+            assert.isFalse(recovered);
+        });
+
+        it("should defer interruption until the end of an uninterruptible region", async () => {
+            const log: string[] = [];
+            const effect = TIO.sleep(50)
+                .flatMap(() => TIO.make(() => log.push("uninterruptible done")))
+                .uninterruptible()
+                .flatMap(() => TIO.make(() => log.push("after region")))
+                .fork()
+                .flatMap((fiber) => TIO.sleep(10).flatMap(() => TIO.interruptFiber(fiber)));
+
+            assertInterrupted(await runtime.unsafeRun(effect));
+            assert.deepEqual(log, ["uninterruptible done"]);
+        });
+
+        it("should allow interruptible sub-regions with uninterruptibleMask", async () => {
+            const log: string[] = [];
+            const effect = TIO.uninterruptibleMask((restore) =>
+                restore(TIO.sleep(1000)).foldCauseM(
+                    (cause) =>
+                        TIO.make(() => log.push(`cleanup after ${cause._tag}`)).flatMap(() => TIO.failCause(cause)),
+                    () => TIO.make(() => log.push("completed"))
+                )
+            )
+                .fork()
+                .flatMap((fiber) => TIO.sleep(10).flatMap(() => TIO.interruptFiber(fiber)));
+
+            assertInterrupted(await runtime.unsafeRun(effect));
+            assert.deepEqual(log, ["cleanup after Interrupt"]);
+        });
+
+        it("should interrupt a fiber that is interrupted before it started", async () => {
+            let started = false;
+            const effect = TIO.make(() => (started = true))
+                .fork()
+                .flatMap((fiber) => TIO.interruptFiber(fiber));
+
+            assertInterrupted(await runtime.unsafeRun(effect));
+            assert.isFalse(started);
+        });
+
+        it("should interrupt a CPU-bound fiber that never suspends", async () => {
+            let iterations = 0;
+            const loop = (): UIO<never> => TIO.make(() => iterations++).flatMap(loop);
+
+            const effect = loop()
+                .fork()
+                .flatMap((fiber) => TIO.sleep(10).flatMap(() => TIO.interruptFiber(fiber)));
+
+            assertInterrupted(await runtime.unsafeRun(effect));
+            assert.isAbove(iterations, 0);
+            const iterationsAfterInterruption = iterations;
+            await wait(20);
+            assert.equal(iterations, iterationsAfterInterruption);
+        });
+
+        it("should interrupt the joining fiber when joining an interrupted fiber", async () => {
+            const effect = TIO.never
+                .fork()
+                .flatMap((fiber) => TIO.interruptFiber(fiber).flatMap(() => TIO.joinFiber(fiber)));
+
+            const exit = await runtime.unsafeRun(effect.fork().flatMap(TIO.awaitFiber));
+            assertInterrupted(exit);
+        });
+
+        it("should reject with InterruptedException when a run is interrupted", async () => {
+            const fiber = runtime.unsafeRunFiber(TIO.never);
+            const exit = new Promise<FiberExit<never, never>>((resolve) => fiber.unsafeAddObserver(resolve));
+            fiber.unsafeInterrupt();
+            assertInterrupted(await exit);
+
+            const joinInterrupted = TIO.never
+                .fork()
+                .flatMap((f) => TIO.interruptFiber(f).flatMap(() => TIO.joinFiber(f)));
+            try {
+                await runtime.unsafeRun(joinInterrupted);
+                assert.fail("Expected unsafeRun to reject");
+            } catch (e) {
+                assert.instanceOf(e, InterruptedException);
+            }
+        });
+    });
+
+    describe("race", () => {
         it("should return the first effect to complete", async () => {
             const fast = TIO.succeed("fast").delay(10);
             const slow = TIO.succeed("slow").delay(100);
 
-            const result = await runtime.unsafeRun(TIO.raceFirst(fast, slow));
+            const result = await runtime.unsafeRun(TIO.race(fast, slow));
             assert.equal(result, "fast");
         });
 
@@ -245,17 +394,39 @@ describe("Fiber", () => {
                     })
                 );
 
-            await runtime.unsafeRun(TIO.raceFirst(fast, slow));
+            await runtime.unsafeRun(TIO.race(fast, slow));
 
             // Give a bit of time for the slow one to potentially complete
-            await new Promise((r) => setTimeout(r, 200));
+            await wait(200);
 
             assert.equal(slowCompleted, false);
         });
 
+        it("should wait for the finalizers of the losers", async () => {
+            let loserFinalized = false;
+            const fast = TIO.succeed("fast").delay(10);
+            const slow = TIO.succeed("slow")
+                .delay(1000)
+                .ensuring(TIO.sleep(20).flatMap(() => TIO.make(() => (loserFinalized = true))));
+
+            assert.equal(await runtime.unsafeRun(TIO.race(fast, slow)), "fast");
+            assert.isTrue(loserFinalized);
+        });
+
+        it("should interrupt all racers when the racing fiber is interrupted", async () => {
+            let finalized = 0;
+            const racer = TIO.never.ensuring(TIO.make(() => finalized++));
+            const effect = TIO.race(racer, racer)
+                .fork()
+                .flatMap((fiber) => TIO.sleep(10).flatMap(() => TIO.interruptFiber(fiber)));
+
+            assertInterrupted(await runtime.unsafeRun(effect));
+            assert.equal(finalized, 2);
+        });
+
         it("should return single effect if only one provided", async () => {
             const effect = TIO.succeed(42);
-            const result = await runtime.unsafeRun(TIO.raceFirst(effect));
+            const result = await runtime.unsafeRun(TIO.race(effect));
             assert.equal(result, 42);
         });
 
@@ -263,11 +434,96 @@ describe("Fiber", () => {
             const failFast = TIO.sleep(10).flatMap(() => TIO.fail("error"));
             const slow = TIO.succeed("slow").delay(100);
 
-            const result = await runtime.safeRunEither(TIO.raceFirst(failFast, slow));
+            const result = await runtime.safeRunEither(TIO.race(failFast, slow));
             assert.isTrue(isLeft(result));
             if (isLeft(result)) {
                 assert.equal(result.left, "error");
             }
+        });
+    });
+
+    describe("timeout", () => {
+        it("should interrupt the effect when the timeout is reached", async () => {
+            let completed = false;
+            const effect = TIO.sleep(100)
+                .flatMap(() => TIO.make(() => (completed = true)))
+                .timeout(10);
+
+            assert.isNull(await runtime.unsafeRun(effect));
+            await wait(150);
+            assert.isFalse(completed);
+        });
+    });
+
+    describe("all", () => {
+        it("should run effects concurrently", async () => {
+            const start = Date.now();
+            const result = await runtime.unsafeRun(TIO.all(TIO.succeed(1).delay(50), TIO.succeed(2).delay(50)));
+            assert.deepEqual(result, [1, 2]);
+            assert.isBelow(Date.now() - start, 95);
+        });
+
+        it("should interrupt the other effects as soon as one fails", async () => {
+            let completed = false;
+            const slow = TIO.sleep(100).flatMap(() => TIO.make(() => (completed = true)));
+            const failing = TIO.sleep(10).flatMap(() => TIO.fail("error"));
+
+            const start = Date.now();
+            assert.deepEqual(
+                await runtime.safeRunEither(TIO.all<unknown, string, unknown>(slow, failing)),
+                left("error")
+            );
+            assert.isBelow(Date.now() - start, 90);
+            await wait(150);
+            assert.isFalse(completed);
+        });
+
+        it("should succeed with an empty array when given no effects", async () => {
+            assert.deepEqual(await runtime.unsafeRun(TIO.all()), []);
+        });
+    });
+
+    describe("defects", () => {
+        it("should turn thrown exceptions into defects that are not caught by orElse", async () => {
+            const boom = new Error("boom");
+            const effect = TIO.make(() => {
+                throw boom;
+            }).orElse(TIO.succeed("recovered"));
+
+            const exit = await runtime.unsafeRun(effect.fork().flatMap(TIO.awaitFiber));
+            assert.isTrue(isFiberFailure(exit) && isDie(exit.cause));
+
+            try {
+                await runtime.safeRunEither(effect);
+                assert.fail("Expected safeRunEither to reject");
+            } catch (e) {
+                assert.equal(e, boom);
+            }
+        });
+
+        it("should combine the failure and the failure of a finalizer with Then", async () => {
+            const effect = TIO.fail("error").ensuring(
+                TIO.make(() => {
+                    throw new Error("cleanup failed");
+                })
+            );
+
+            const exit = await runtime.unsafeRun(effect.fork().flatMap(TIO.awaitFiber));
+            assert.isTrue(isFiberFailure(exit));
+            if (isFiberFailure(exit)) assert.equal(exit.cause._tag, CauseTag.Then);
+        });
+    });
+
+    describe("stack safety", () => {
+        it("should run deeply nested flatMaps", async () => {
+            const loop = (n: number): UIO<number> => (n === 0 ? TIO.succeed(0) : TIO.succeed(n - 1).flatMap(loop));
+            assert.equal(await runtime.unsafeRun(loop(100_000)), 0);
+        });
+
+        it("should run left-nested flatMaps", async () => {
+            let effect: UIO<number> = TIO.succeed(0);
+            for (let i = 0; i < 100_000; i++) effect = effect.map((n) => n + 1);
+            assert.equal(await runtime.unsafeRun(effect), 100_000);
         });
     });
 });
@@ -357,81 +613,59 @@ describe("FiberExit helpers", () => {
     });
 });
 
-describe("FiberContext", () => {
-    it("should have a unique id", () => {
-        const fiber1 = new FiberContext();
-        const fiber2 = new FiberContext();
+describe("Runtime fibers", () => {
+    const runtime: Runtime<never> = Runtime.default;
+
+    it("should have unique ids", () => {
+        const fiber1 = runtime.unsafeRunFiber(TIO.succeed(1));
+        const fiber2 = runtime.unsafeRunFiber(TIO.succeed(2));
         assert.notEqual(fiber1.id.id, fiber2.id.id);
     });
 
-    it("should start in Running state", () => {
-        const fiber = new FiberContext();
-        const status = fiber.unsafeStatus();
-        assert.equal(status._tag, FiberStatusTag.Running);
-    });
-
-    it("should transition to Done after done() is called", () => {
-        const fiber = new FiberContext<never, number>();
-        fiber.done(fiberSuccess(42));
+    it("should run synchronous effects to completion immediately", () => {
+        const fiber = runtime.unsafeRunFiber(TIO.succeed(42));
         const status = fiber.unsafeStatus();
         assert.equal(status._tag, FiberStatusTag.Done);
     });
 
-    it("should notify observers when done", () => {
-        const fiber = new FiberContext<never, number>();
-        let notified = false;
-
-        fiber.unsafeAddObserver(() => {
-            notified = true;
-        });
-
-        fiber.done(fiberSuccess(42));
-        assert.equal(notified, true);
+    it("should notify observers when done", async () => {
+        const fiber = runtime.unsafeRunFiber(TIO.succeed(42).delay(10));
+        const exit = await new Promise<FiberExit<never, number>>((resolve) => fiber.unsafeAddObserver(resolve));
+        assert.deepEqual(exit, fiberSuccess(42));
     });
 
     it("should immediately notify if already done", () => {
-        const fiber = new FiberContext<never, number>();
-        fiber.done(fiberSuccess(42));
-
+        const fiber = runtime.unsafeRunFiber(TIO.succeed(42));
         let notified = false;
         fiber.unsafeAddObserver(() => {
             notified = true;
         });
-
-        assert.equal(notified, true);
+        assert.isTrue(notified);
     });
 
-    it("should allow unsubscribing observers", () => {
-        const fiber = new FiberContext<never, number>();
+    it("should allow unsubscribing observers", async () => {
+        const fiber = runtime.unsafeRunFiber(TIO.succeed(42).delay(10));
         let notified = false;
-
         const unsubscribe = fiber.unsafeAddObserver(() => {
             notified = true;
         });
-
         unsubscribe();
-        fiber.done(fiberSuccess(42));
-
-        assert.equal(notified, false);
+        await wait(30);
+        assert.isFalse(notified);
     });
 
-    it("should not call done twice", () => {
-        const fiber = new FiberContext<never, number>();
-        let callCount = 0;
-
-        fiber.unsafeAddObserver(() => {
-            callCount++;
-        });
-
-        fiber.done(fiberSuccess(42));
-        fiber.done(fiberSuccess(100)); // Should be ignored
-
-        assert.equal(callCount, 1);
-
+    it("should ignore interruption of a completed fiber", () => {
+        const fiber = runtime.unsafeRunFiber(TIO.succeed(42));
+        fiber.unsafeInterrupt();
         const status = fiber.unsafeStatus();
-        if (status._tag === FiberStatusTag.Done && isFiberSuccess(status.exit)) {
-            assert.equal(status.exit.value, 42); // First value wins
-        }
+        assert.isTrue(status._tag === FiberStatusTag.Done && isFiberSuccess(status.exit));
+    });
+
+    it("should be interruptible from outside", async () => {
+        const fiber = runtime.unsafeRunFiber(TIO.sleep(1000));
+        fiber.unsafeInterrupt();
+        const exit = await new Promise<FiberExit<never, void>>((resolve) => fiber.unsafeAddObserver(resolve));
+        assert.isTrue(isFiberFailure(exit) && isInterrupted(exit.cause));
     });
 });
 

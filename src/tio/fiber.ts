@@ -1,4 +1,4 @@
-import { both, Cause, FiberId, interrupt as causeInterrupt, makeFiberId } from "./cause";
+import { both, Cause, FiberId } from "./cause";
 
 export const enum FiberStatusTag {
     Running = "Running",
@@ -46,6 +46,12 @@ export function isFiberFailure<E, A>(exit: FiberExit<E, A>): exit is FiberFailur
 
 /**
  * Fiber represents a running effect that can be observed or interrupted.
+ *
+ * - `unsafeAddObserver` registers a callback called with the exit of the fiber (immediately if already done).
+ *   It returns a function removing the observer.
+ * - `unsafeInterrupt` requests the interruption of the fiber. It is asynchronous: the fiber stops at its
+ *   next step (or immediately if it is waiting on an async operation), after running its finalizers.
+ *   Use `TIO.interruptFiber` to wait for the interruption to complete.
  */
 export interface Fiber<E, A> {
     readonly id: FiberId;
@@ -55,60 +61,7 @@ export interface Fiber<E, A> {
 }
 
 /**
- * Internal mutable state for a running fiber.
- */
-export class FiberContext<E, A> implements Fiber<E, A> {
-    readonly id: FiberId;
-    private status: FiberStatus<E, A>;
-    private observers: Array<(exit: FiberExit<E, A>) => void>;
-    private interrupted: boolean;
-    private interruptible: boolean;
-
-    constructor() {
-        this.id = makeFiberId();
-        this.status = { _tag: FiberStatusTag.Running };
-        this.observers = [];
-        this.interrupted = false;
-        this.interruptible = true;
-    }
-
-    done(exit: FiberExit<E, A>): void {
-        if (this.status._tag === FiberStatusTag.Done) return;
-        this.status = { _tag: FiberStatusTag.Done, exit };
-        const observers = this.observers;
-        this.observers = [];
-        for (const observer of observers) {
-            observer(exit);
-        }
-    }
-
-    unsafeAddObserver(callback: (exit: FiberExit<E, A>) => void): () => void {
-        if (this.status._tag === FiberStatusTag.Done) {
-            callback(this.status.exit);
-            return () => {};
-        }
-        this.observers.push(callback);
-        return () => {
-            const idx = this.observers.indexOf(callback);
-            if (idx >= 0) this.observers.splice(idx, 1);
-        };
-    }
-
-    unsafeInterrupt(): void {
-        if (this.interrupted) return;
-        this.interrupted = true;
-        if (this.interruptible && this.status._tag !== FiberStatusTag.Done) {
-            this.done(fiberFailure(causeInterrupt(this.id)));
-        }
-    }
-
-    unsafeStatus(): FiberStatus<E, A> {
-        return this.status;
-    }
-}
-
-/**
- * Exception thrown when a fiber is interrupted.
+ * Error used to reject the Promise of a run whose fiber was interrupted.
  */
 export class InterruptedException extends Error {
     constructor(readonly fiberId: FiberId) {

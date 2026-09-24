@@ -13,6 +13,7 @@ import {
     isEmpty,
     isFailure,
     isInterrupted,
+    isInterruptedOnly,
     makeFiberId,
     map,
     prettyPrint,
@@ -158,6 +159,25 @@ describe("Cause", () => {
 
             it("should return true for Both containing Interrupt", () => {
                 assert.equal(isInterrupted(both(interrupt(fiberId1), fail("error"))), true);
+            });
+        });
+
+        describe("isInterruptedOnly", () => {
+            it("should return true for Interrupt", () => {
+                assert.equal(isInterruptedOnly(interrupt(fiberId1)), true);
+            });
+
+            it("should return true for combined Interrupts", () => {
+                assert.equal(isInterruptedOnly(both(interrupt(fiberId1), interrupt(fiberId2))), true);
+            });
+
+            it("should return false for Empty", () => {
+                assert.equal(isInterruptedOnly(empty), false);
+            });
+
+            it("should return false for Interrupt combined with a Fail or a Die", () => {
+                assert.equal(isInterruptedOnly(both(interrupt(fiberId1), fail("error"))), false);
+                assert.equal(isInterruptedOnly(sequential(interrupt(fiberId1), die("defect"))), false);
             });
         });
 

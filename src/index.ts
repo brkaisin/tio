@@ -150,7 +150,7 @@ async function example3_Racing() {
 
     const slow = log("Slow task starting").flatMap(() => TIO.sleep(200).map(() => "slow wins!"));
 
-    const winner = await runtime.unsafeRun(TIO.raceFirst(fast, slow));
+    const winner = await runtime.unsafeRun(TIO.race(fast, slow));
     console.log(`Winner: ${winner}`);
 }
 
@@ -165,7 +165,7 @@ async function example4_Timeout() {
 
     function withTimeout<R, E, A>(effect: TIO<R, E, A>, ms: number, timeoutError: E): TIO<R, E, A> {
         const timeout = TIO.sleep(ms).flatMap(() => TIO.fail(timeoutError)) as TIO<R, E, A>;
-        return TIO.raceFirst(effect, timeout);
+        return TIO.race(effect, timeout);
     }
 
     const slowOperation = log("Starting slow operation...")
@@ -397,13 +397,9 @@ async function example12_ExponentialBackoff() {
     }
 
     let attempts = 0;
-    const flakyService = TIO.make(() => {
-        attempts++;
-        if (attempts < 4) {
-            throw new Error(`Attempt ${attempts} failed`);
-        }
-        return `Success on attempt ${attempts}!`;
-    });
+    const flakyService = TIO.make(() => ++attempts).flatMap((attempt) =>
+        attempt < 4 ? TIO.fail(new Error(`Attempt ${attempt} failed`)) : TIO.succeed(`Success on attempt ${attempt}!`)
+    );
 
     const result = await Runtime.default.safeRunEither(retryWithBackoff(flakyService, 5, 50));
 

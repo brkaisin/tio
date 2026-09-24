@@ -1,52 +1,52 @@
 import { identity } from "./util/functions";
 import { IO, UIO, URIO } from "./aliases";
 import { Either, fold } from "./util/either";
-import { Fiber, FiberExit, FiberStatus, isFiberSuccess } from "./fiber";
-import { CauseTag } from "./cause";
+import { Fiber, FiberExit, fiberFailure, FiberStatus, fiberSuccess, isFiberSuccess } from "./fiber";
+import { both, Cause, CauseTag, empty, fail, failures, isInterruptedOnly, sequential } from "./cause";
 
 export const enum TIOOpTag {
     Succeed = "Succeed",
-    Fail = "Fail",
+    FailCause = "FailCause",
     Sync = "Sync",
     Async = "Async",
     FlatMap = "FlatMap",
-    FoldM = "FoldM",
-    Race = "Race",
-    All = "All",
-    Ensuring = "Ensuring",
-    Sleep = "Sleep",
+    FoldCauseM = "FoldCauseM",
     Fork = "Fork",
-    SetInterruptible = "SetInterruptible",
-    CheckInterrupt = "CheckInterrupt"
+    SetInterruptible = "SetInterruptible"
 }
+
+/** Cancels a pending async operation. Called when the waiting fiber is interrupted. */
+export type Canceler = () => void;
+
 /**
  * TIO ADT operations.
  * `cont` = continuation, used for type-safe existential encoding via CPS
  */
 export type TIOOp<R, E, A> =
     | { _tag: TIOOpTag.Succeed; value: A }
-    | { _tag: TIOOpTag.Fail; error: E }
+    | { _tag: TIOOpTag.FailCause; cause: Cause<E> }
     | { _tag: TIOOpTag.Sync; f: (r: R) => A }
-    | { _tag: TIOOpTag.Async; register: (r: R, resolve: (a: A) => void, reject: (e: E) => void) => void }
+    | {
+          _tag: TIOOpTag.Async;
+          register: (r: R, resolve: (a: A) => void, reject: (e: E) => void) => Canceler | void;
+      }
     | { _tag: TIOOpTag.FlatMap; run: <B>(cont: <A1>(tio: TIO<R, E, A1>, f: (a1: A1) => TIO<R, E, A>) => B) => B }
     | {
-          _tag: TIOOpTag.FoldM;
+          _tag: TIOOpTag.FoldCauseM;
           run: <B>(
               cont: <A1, E1>(
                   tio: TIO<R, E1, A1>,
-                  onError: (e1: E1) => TIO<R, E, A>,
+                  onFailure: (cause: Cause<E1>) => TIO<R, E, A>,
                   onSuccess: (a1: A1) => TIO<R, E, A>
               ) => B
           ) => B;
       }
-    | { _tag: TIOOpTag.Race; tios: Array<TIO<R, E, A>> }
-    | { _tag: TIOOpTag.All; run: <B>(cont: <A1>(tios: Array<TIO<R, E, A1>>) => B) => B }
-    | { _tag: TIOOpTag.Ensuring; run: <B>(cont: <E1>(tio: TIO<R, E1, A>, finalizer: TIO<R, never, unknown>) => B) => B }
-    | { _tag: TIOOpTag.Sleep; ms: number }
-    // Fiber operations
     | { _tag: TIOOpTag.Fork; run: <B>(cont: <E1, A1>(tio: TIO<R, E1, A1>) => B) => B }
-    | { _tag: TIOOpTag.SetInterruptible; interruptible: boolean; tio: TIO<R, E, A> }
-    | { _tag: TIOOpTag.CheckInterrupt };
+    // `run` receives the interruptibility that was active before entering the region
+    | { _tag: TIOOpTag.SetInterruptible; interruptible: boolean; run: (previous: boolean) => TIO<R, E, A> };
+
+/** Restores the interruptibility of the enclosing region, see `TIO.uninterruptibleMask`. */
+export type Restore = <R, E, A>(tio: TIO<R, E, A>) => TIO<R, E, A>;
 
 /**
  * TIO is a purely functional effect type that describes effectful computations.
@@ -150,17 +150,28 @@ export class TIO<in R, out E, out A> {
         return f(this.flip()).flip();
     }
 
-    /** Handles both success and error cases with effects. */
+    /** Handles both success and error cases with effects. Defects and interruptions are not caught. */
     foldM<R1, E1, B>(onError: (e: E) => TIO<R1, E1, B>, onSuccess: (a: A) => TIO<R1, E1, B>): TIO<R & R1, E1, B> {
+        return this.foldCauseM((cause) => {
+            const errors = failures(cause);
+            return errors.length > 0 ? onError(errors[0]) : TIO.failCause(cause as Cause<never>);
+        }, onSuccess);
+    }
+
+    /** Handles both success and failure cases with effects, giving access to the full Cause of a failure. */
+    foldCauseM<R1, E1, B>(
+        onFailure: (cause: Cause<E>) => TIO<R1, E1, B>,
+        onSuccess: (a: A) => TIO<R1, E1, B>
+    ): TIO<R & R1, E1, B> {
         return new TIO<R & R1, E1, B>({
-            _tag: TIOOpTag.FoldM,
+            _tag: TIOOpTag.FoldCauseM,
             run: <C>(
                 cont: <A1, E2>(
                     tio: TIO<R & R1, E2, A1>,
-                    onErr: (e: E2) => TIO<R & R1, E1, B>,
+                    onFail: (cause: Cause<E2>) => TIO<R & R1, E1, B>,
                     onSucc: (a1: A1) => TIO<R & R1, E1, B>
                 ) => C
-            ) => cont(this, onError, onSuccess)
+            ) => cont(this, onFailure, onSuccess)
         });
     }
 
@@ -217,13 +228,21 @@ export class TIO<in R, out E, out A> {
         return TIO.sleep(ms).flatMap(() => this);
     }
 
-    /** Ensures a finalizer runs after this effect, regardless of success or failure. */
+    /**
+     * Ensures a finalizer runs after this effect, whether it succeeds, fails or is interrupted.
+     * The finalizer itself runs uninterruptibly.
+     */
     ensuring<R1>(finalizer: TIO<R1, never, unknown>): TIO<R & R1, E, A> {
-        return new TIO<R & R1, E, A>({
-            _tag: TIOOpTag.Ensuring,
-            run: <B>(cont: <E1>(tio: TIO<R & R1, E1, A>, fin: TIO<R & R1, never, unknown>) => B) =>
-                cont(this, finalizer)
-        });
+        return TIO.uninterruptibleMask((restore) =>
+            restore(this).foldCauseM(
+                (cause) =>
+                    finalizer.foldCauseM(
+                        (finalizerCause) => TIO.failCause(sequential<E>(cause, finalizerCause)),
+                        () => TIO.failCause(cause)
+                    ),
+                (a) => finalizer.foldCauseM(TIO.failCause, () => TIO.succeed(a))
+            )
+        );
     }
 
     /** Retries this effect up to n times on failure. */
@@ -232,47 +251,40 @@ export class TIO<in R, out E, out A> {
         return this.orElse(this.retry(n - 1));
     }
 
-    /** Races this effect against others, returning the first to complete. */
+    /** Races this effect against others, returning the first to complete. The losers are interrupted. */
     race<R1, E1, B>(...tios: Array<TIO<R1, E1, B>>): TIO<R & R1, E | E1, A | B> {
         return TIO.race<R & R1, E | E1, A | B>(this, ...tios);
     }
 
-    /** Returns the result if completed within the timeout, otherwise null. */
+    /** Returns the result if completed within the timeout, otherwise null. The effect is interrupted on timeout. */
     timeout(ms: number): TIO<R, E, A | null> {
         return this.race(TIO.sleep(ms).as(null));
     }
 
     /**
-     * Fork this effect to run in a new fiber.
-     * Returns immediately with a Fiber handle that can be used to join or interrupt.
+     * Forks this effect into a new fiber, which starts running concurrently.
+     * Returns immediately with a Fiber handle that can be used to join, await or interrupt it.
+     * A forked fiber always starts in an interruptible region.
      */
-    fork(): TIO<R, never, Fiber<E, A>> {
+    fork(): URIO<R, Fiber<E, A>> {
         return new TIO<R, never, Fiber<E, A>>({
             _tag: TIOOpTag.Fork,
             run: <B>(cont: <E1, A1>(tio: TIO<R, E1, A1>) => B) => cont(this)
-        }) as TIO<R, never, Fiber<E, A>>;
+        });
     }
 
-    /**
-     * Run this effect in an interruptible region.
-     */
+    /** Runs this effect in an interruptible region: it can be interrupted at any step. */
     interruptible(): TIO<R, E, A> {
-        return new TIO<R, E, A>({
-            _tag: TIOOpTag.SetInterruptible,
-            interruptible: true,
-            tio: this
-        });
+        return this.setInterruptible(true);
     }
 
-    /**
-     * Run this effect in an uninterruptible region.
-     */
+    /** Runs this effect in an uninterruptible region: interruption is deferred until the region is exited. */
     uninterruptible(): TIO<R, E, A> {
-        return new TIO<R, E, A>({
-            _tag: TIOOpTag.SetInterruptible,
-            interruptible: false,
-            tio: this
-        });
+        return this.setInterruptible(false);
+    }
+
+    private setInterruptible(interruptible: boolean): TIO<R, E, A> {
+        return new TIO<R, E, A>({ _tag: TIOOpTag.SetInterruptible, interruptible, run: () => this });
     }
 
     /** Creates an effect from a synchronous function that uses the environment. */
@@ -285,8 +297,13 @@ export class TIO<in R, out E, out A> {
         return tio.flatMap(identity);
     }
 
-    /** Creates an effect from an async callback-based API. */
-    static async<R, E, A>(register: (r: R, resolve: (a: A) => void, reject: (e: E) => void) => void): TIO<R, E, A> {
+    /**
+     * Creates an effect from an async callback-based API.
+     * `register` may return a Canceler, called if the fiber is interrupted while waiting.
+     */
+    static async<R, E, A>(
+        register: (r: R, resolve: (a: A) => void, reject: (e: E) => void) => Canceler | void
+    ): TIO<R, E, A> {
         return new TIO<R, E, A>({ _tag: TIOOpTag.Async, register });
     }
 
@@ -311,25 +328,83 @@ export class TIO<in R, out E, out A> {
 
     /** Creates an effect that fails with the given error. */
     static fail<E>(e: E): IO<E, never> {
-        return new TIO<void, E, never>({ _tag: TIOOpTag.Fail, error: e });
+        return TIO.failCause(fail(e));
     }
 
-    /** Races multiple effects, returning the first to complete. */
-    static race<R, E, A>(...tios: Array<TIO<R, E, A>>): TIO<R, E, A> {
-        return new TIO<R, E, A>({ _tag: TIOOpTag.Race, tios });
+    /** Creates an effect that fails with the given Cause. */
+    static failCause<E>(cause: Cause<E>): IO<E, never> {
+        return new TIO<void, E, never>({ _tag: TIOOpTag.FailCause, cause });
     }
 
-    /** Runs multiple effects in parallel, collecting all results. */
-    static all<R, E, A>(...tios: Array<TIO<R, E, A>>): TIO<R, E, Array<A>> {
-        return new TIO<R, E, Array<A>>({
-            _tag: TIOOpTag.All,
-            run: <B>(cont: <A1>(tios: Array<TIO<R, E, A1>>) => B) => cont(tios)
+    /** Creates an effect from a FiberExit: succeeds with its value or fails with its Cause. */
+    static fromFiberExit<E, A>(exit: FiberExit<E, A>): IO<E, A> {
+        return isFiberSuccess(exit) ? TIO.succeed(exit.value) : TIO.failCause(exit.cause);
+    }
+
+    /**
+     * Runs the effect returned by `f` in an uninterruptible region.
+     * `restore` makes a sub-effect interruptible again if the enclosing region was interruptible.
+     */
+    static uninterruptibleMask<R, E, A>(f: (restore: Restore) => TIO<R, E, A>): TIO<R, E, A> {
+        return new TIO<R, E, A>({
+            _tag: TIOOpTag.SetInterruptible,
+            interruptible: false,
+            run: (previous) => f((tio) => tio.setInterruptible(previous))
         });
+    }
+
+    /**
+     * Races multiple effects concurrently, returning the first to complete (successfully or not).
+     * The losers are interrupted, and the race only completes once they are done.
+     */
+    static race<R, E, A>(...tios: Array<TIO<R, E, A>>): TIO<R, E, A> {
+        if (tios.length === 1) return tios[0];
+        return TIO.forkAllMasked(tios, (fibers) =>
+            TIO.async<unknown, never, FiberExit<E, A>>((_, resolve) => onEachExit(fibers, resolve))
+        ).flatMap(([winner]) => TIO.fromFiberExit(winner));
+    }
+
+    /**
+     * Runs multiple effects concurrently, collecting all results.
+     * Fails as soon as one effect fails, interrupting the others.
+     */
+    static all<R, E, A>(...tios: Array<TIO<R, E, A>>): TIO<R, E, Array<A>> {
+        return TIO.forkAllMasked(tios, (fibers) =>
+            TIO.async<unknown, never, void>((_, resolve) => {
+                let remaining = fibers.length;
+                if (remaining === 0) resolve();
+                return onEachExit(fibers, (exit) => {
+                    if (!isFiberSuccess(exit) || --remaining === 0) resolve();
+                });
+            })
+        ).flatMap(([, exits]) => TIO.fromFiberExit(mergeExits(exits)));
+    }
+
+    /**
+     * Forks the effects, waits using `wait`, then interrupts the fibers that are still running and
+     * returns the result of `wait` with all the exits. If the current fiber is interrupted while
+     * waiting, all the fibers are interrupted too, so that none of them outlives the current one.
+     */
+    private static forkAllMasked<R, E, A, W>(
+        tios: Array<TIO<R, E, A>>,
+        wait: (fibers: Array<Fiber<E, A>>) => UIO<W>
+    ): URIO<R, [W, Array<FiberExit<E, A>>]> {
+        return TIO.uninterruptibleMask((restore) =>
+            TIO.forkAll(tios).flatMap((fibers) =>
+                restore(wait(fibers)).foldCauseM(
+                    (cause) => TIO.interruptAll(fibers).flatMap(() => TIO.failCause(cause)),
+                    (w) => TIO.interruptAll(fibers).map((exits): [W, Array<FiberExit<E, A>>] => [w, exits])
+                )
+            )
+        );
     }
 
     /** Creates an effect that sleeps for the given milliseconds. */
     static sleep(ms: number): UIO<void> {
-        return new TIO<void, never, void>({ _tag: TIOOpTag.Sleep, ms });
+        return TIO.async<unknown, never, void>((_, resolve) => {
+            const handle = setTimeout(resolve, ms);
+            return () => clearTimeout(handle);
+        });
     }
 
     /** Never completes - useful for keeping a fiber alive or as a timeout target. */
@@ -339,109 +414,71 @@ export class TIO<in R, out E, out A> {
         });
     }
 
-    /** Check if the current fiber has been interrupted. */
-    static get checkInterrupted(): UIO<void> {
-        return new TIO<void, never, void>({ _tag: TIOOpTag.CheckInterrupt });
-    }
-
     /** Fork an effect to run in a new fiber. */
-    static fork<R, E, A>(tio: TIO<R, E, A>): TIO<R, never, Fiber<E, A>> {
+    static fork<R, E, A>(tio: TIO<R, E, A>): URIO<R, Fiber<E, A>> {
         return tio.fork();
     }
 
-    /** Fork all effects and run them in parallel fibers. */
-    static forkAll<R, E, A>(tios: Array<TIO<R, E, A>>): TIO<R, never, Array<Fiber<E, A>>> {
-        return TIO.all(...tios.map((t) => t.fork()));
+    /** Fork all effects, each in its own fiber. */
+    static forkAll<R, E, A>(tios: Array<TIO<R, E, A>>): URIO<R, Array<Fiber<E, A>>> {
+        return tios.reduce<URIO<R, Array<Fiber<E, A>>>>(
+            (acc, tio) => acc.flatMap((fibers) => tio.fork().map((fiber) => [...fibers, fiber])),
+            TIO.succeed([])
+        );
     }
 
-    /** Wait for a fiber to complete and return its result. */
-    static joinFiber<E, A>(fiber: Fiber<E, A>): TIO<never, E, A> {
-        return TIO.async<never, E, A>((_, resolve, reject) => {
-            fiber.unsafeAddObserver((exit) => {
-                if (isFiberSuccess(exit)) {
-                    resolve(exit.value);
-                } else {
-                    const cause = exit.cause;
-                    if (cause._tag === CauseTag.Fail) {
-                        reject(cause.error);
-                    } else if (cause._tag === CauseTag.Die) {
-                        throw cause.defect;
-                    } else {
-                        reject(undefined as E);
-                    }
-                }
-            });
-        });
+    /** Wait for a fiber to complete and return its result, failing if the fiber failed. */
+    static joinFiber<E, A>(fiber: Fiber<E, A>): IO<E, A> {
+        return TIO.awaitFiber(fiber).flatMap(TIO.fromFiberExit);
     }
 
     /** Wait for a fiber to complete and return its exit value. */
     static awaitFiber<E, A>(fiber: Fiber<E, A>): UIO<FiberExit<E, A>> {
-        return TIO.async<void, never, FiberExit<E, A>>((_, resolve) => {
-            fiber.unsafeAddObserver(resolve);
-        });
+        return TIO.async<unknown, never, FiberExit<E, A>>((_, resolve) => fiber.unsafeAddObserver(resolve));
     }
 
-    /** Interrupt a fiber and wait for it to complete. */
+    /** Interrupt a fiber and wait for it to complete (including its finalizers). */
     static interruptFiber<E, A>(fiber: Fiber<E, A>): UIO<FiberExit<E, A>> {
-        return TIO.make<void, void>(() => {
-            fiber.unsafeInterrupt();
-        }).flatMap(() => TIO.awaitFiber(fiber));
+        return TIO.make(() => fiber.unsafeInterrupt()).flatMap(() => TIO.awaitFiber(fiber));
+    }
+
+    /** Interrupt all fibers and wait for all of them to complete. */
+    static interruptAll<E, A>(fibers: Array<Fiber<E, A>>): UIO<Array<FiberExit<E, A>>> {
+        return TIO.make(() => fibers.forEach((fiber) => fiber.unsafeInterrupt())).flatMap(() =>
+            fibers.reduce<UIO<Array<FiberExit<E, A>>>>(
+                (acc, fiber) => acc.flatMap((exits) => TIO.awaitFiber(fiber).map((exit) => [...exits, exit])),
+                TIO.succeed([])
+            )
+        );
     }
 
     /** Get the status of a fiber. */
     static fiberStatus<E, A>(fiber: Fiber<E, A>): UIO<FiberStatus<E, A>> {
-        return TIO.succeed(fiber.unsafeStatus());
+        return TIO.make(() => fiber.unsafeStatus());
     }
+}
 
-    /**
-     * Race effects with proper cancellation of losers.
-     */
-    static raceFirst<R, E, A>(...tios: Array<TIO<R, E, A>>): TIO<R, E, A> {
-        if (tios.length === 0) return TIO.never;
-        if (tios.length === 1) return tios[0];
+/** Calls `callback` with the exit of each fiber as it completes. Returns a Canceler removing the observers. */
+function onEachExit<E, A>(fibers: Array<Fiber<E, A>>, callback: (exit: FiberExit<E, A>) => void): Canceler {
+    const unsubscribes = fibers.map((fiber) => fiber.unsafeAddObserver(callback));
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+}
 
-        return TIO.forkAll(tios).flatMap((fibers) =>
-            TIO.async<R, E, A>((_, resolve, reject) => {
-                let done = false;
-                for (const fiber of fibers) {
-                    fiber.unsafeAddObserver((exit) => {
-                        if (done) return;
-                        done = true;
-                        // Interrupt losers
-                        for (const f of fibers) if (f !== fiber) f.unsafeInterrupt();
-
-                        if (isFiberSuccess(exit)) {
-                            resolve(exit.value);
-                        } else if (exit.cause._tag === CauseTag.Fail) {
-                            reject(exit.cause.error);
-                        } else {
-                            reject(undefined as E);
-                        }
-                    });
-                }
-            })
-        );
+/**
+ * Merges the exits of parallel fibers: succeeds with all values, or fails with the combined causes.
+ * Interruptions are only reported if nothing else went wrong, since they are usually a consequence
+ * of another fiber failing.
+ */
+function mergeExits<E, A>(exits: Array<FiberExit<E, A>>): FiberExit<E, Array<A>> {
+    const values: Array<A> = [];
+    let cause: Cause<E> = empty;
+    let interruptions: Cause<E> = empty;
+    for (const exit of exits) {
+        if (isFiberSuccess(exit)) values.push(exit.value);
+        else if (isInterruptedOnly(exit.cause)) interruptions = both(interruptions, exit.cause);
+        else cause = both(cause, exit.cause);
     }
-
-    // alternative implementation of raceFirst supposed to be equivalent but would need testing
-    static raceFirst2<R, E, A>(...tios: Array<TIO<R, E, A>>): TIO<R, E, A> {
-        if (tios.length === 0) return TIO.never;
-        if (tios.length === 1) return tios[0];
-
-        return TIO.forkAll(tios).flatMap((fibers) =>
-            TIO.race(
-                ...fibers.map((fiber) =>
-                    TIO.awaitFiber(fiber).flatMap((exit) =>
-                        TIO.all(...fibers.filter((f) => f !== fiber).map(TIO.interruptFiber)).flatMap(() =>
-                            isFiberSuccess(exit)
-                                ? TIO.succeed(exit.value)
-                                : exit.cause._tag === CauseTag.Fail
-                                  ? TIO.fail(exit.cause.error)
-                                  : TIO.fail(undefined as E)
-                        )
-                    )
-                )
-            )
-        );
-    }
+    if (cause._tag !== CauseTag.Empty) return fiberFailure(cause);
+    if (interruptions._tag !== CauseTag.Empty) return fiberFailure(interruptions);
+    return fiberSuccess(values);
 }

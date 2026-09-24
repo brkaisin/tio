@@ -124,6 +124,9 @@ const customRuntime = Runtime.default
 | `safeRunEither` | `Promise<Either<E, A>>` | Returns Left/Right |
 | `safeRunExit` | `Promise<Exit<E, A>>` | Returns success/failure |
 | `safeRunUnion` | `Promise<E \| A>` | Returns error or value |
+| `unsafeRunFiber` | `Fiber<E, A>` | Returns the running root fiber (see [Fibers](./fibers.md)) |
+
+Defects (thrown exceptions) and interruptions are not part of `E`: they always reject the returned Promise.
 
 ## Effect Operations
 
@@ -134,7 +137,7 @@ const customRuntime = Runtime.default
 | `TIO.succeed(a)` | Effect that succeeds with `a` |
 | `TIO.fail(e)` | Effect that fails with `e` |
 | `TIO.make(f)` | Effect from sync function |
-| `TIO.async(register)` | Effect from async callback |
+| `TIO.async(register)` | Effect from async callback (may return a canceler) |
 | `TIO.fromPromise(f)` | Effect from Promise |
 | `TIO.fromEither(either)` | Effect from Either |
 | `TIO.sleep(ms)` | Effect that waits |
@@ -156,6 +159,7 @@ const customRuntime = Runtime.default
 |-----------|-------------|
 | `.orElse(that)` | Fallback on error |
 | `.foldM(onErr, onSucc)` | Handle both cases with effects |
+| `.foldCauseM(onCause, onSucc)` | Same, with the full `Cause` (see [Error Handling](./error-handling.md)) |
 | `.fold(onErr, onSucc)` | Handle both cases with functions |
 | `.retry(n)` | Retry on failure |
 | `.absolve()` | Convert `TIO<R, E, Either<E1, A>>` to `TIO<R, E \| E1, A>` |
@@ -176,18 +180,20 @@ const customRuntime = Runtime.default
 | `.zip(that)` | Combine two effects into tuple |
 | `.zipLeft(that)` | Run both, keep left result |
 | `.zipRight(that)` | Run both, keep right result |
-| `TIO.all(...effects)` | Run all in parallel |
-| `TIO.race(...effects)` | Return first to complete |
+| `TIO.all(...effects)` | Run all concurrently (fail fast, interrupting the others) |
+| `TIO.race(...effects)` | Return first to complete, interrupting the others |
 
 ### Timing
 
 | Operation | Description |
 |-----------|-------------|
 | `.delay(ms)` | Delay execution |
-| `.timeout(ms)` | Fail if not complete in time |
+| `.timeout(ms)` | Return `null` if not complete in time (the effect is interrupted) |
 | `TIO.sleep(ms)` | Wait for duration |
 
 ## Next Steps
 
+- [Fibers](./fibers.md) - Concurrent execution
+- [Error Handling](./error-handling.md) - Rich error types with Cause
 - [Dependency Injection](./dependency-injection.md) - Managing the environment
 

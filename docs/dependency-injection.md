@@ -333,4 +333,5 @@ runtime.safeRunEither(getUser(1)).then((result) => {
 
 - [Getting Started](./getting-started.md) - Quick introduction
 - [Core Concepts](./core-concepts.md) - TIO fundamentals
+- [Fibers](./fibers.md) - Concurrent execution
 

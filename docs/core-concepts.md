@@ -134,7 +134,7 @@ const customRuntime = Runtime.default
 | `TIO.succeed(a)` | Effect that succeeds with `a` |
 | `TIO.fail(e)` | Effect that fails with `e` |
 | `TIO.make(f)` | Effect from sync function |
-| `TIO.async(register)` | Effect from async callback |
+| `TIO.async(register)` | Effect from async callback (may return a canceler) |
 | `TIO.fromPromise(f)` | Effect from Promise |
 | `TIO.fromEither(either)` | Effect from Either |
 | `TIO.sleep(ms)` | Effect that waits |
@@ -176,8 +176,8 @@ const customRuntime = Runtime.default
 | `.zip(that)` | Combine two effects into tuple |
 | `.zipLeft(that)` | Run both, keep left result |
 | `.zipRight(that)` | Run both, keep right result |
-| `TIO.all(...effects)` | Run all in parallel |
-| `TIO.race(...effects)` | Return first to complete |
+| `TIO.all(...effects)` | Run all concurrently (fail fast, interrupting the others) |
+| `TIO.race(...effects)` | Return first to complete, interrupting the others |
 
 ### Timing
 

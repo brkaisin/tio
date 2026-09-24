@@ -62,6 +62,10 @@ const parseJson = (s: string): TIO<never, never, object> =>
 // If JSON.parse throws, it becomes a Die (defect)
 ```
 
+Any exception thrown by your code (in `TIO.make`, in the function passed to `map`/`flatMap`, ...) becomes a `Die`.
+Defects are not part of the error type `E`, so they are **not** caught by `foldM`, `orElse`, `mapError`, etc.
+To turn an exception into a typed error, catch it yourself and use `TIO.fail`, or use `TIO.fromPromise`.
+
 ## Cause in FiberExit
 
 When a fiber completes with a failure, the `FiberExit` contains a `Cause`:
@@ -110,23 +114,19 @@ Then(
 
 ### Both: Parallel Failures
 
-When multiple parallel effects fail:
+`Both` combines failures that happened concurrently, in different fibers. Note that `TIO.all` fails fast:
+as soon as one effect fails, the others are interrupted, so usually only the first failure is reported.
 
 ```typescript
 const effect = TIO.all(
-    TIO.fail("error1"),
-    TIO.fail("error2")
+    TIO.fail("error1").delay(10),
+    TIO.fail("error2").delay(20) // interrupted before it can fail
 );
+// Fail("error1")
 ```
 
-The cause would be:
-
-```
-Both(
-  Fail("error1"),
-  Fail("error2")
-)
-```
+If several effects fail before being interrupted (for instance an interrupted effect whose finalizer dies),
+the causes are combined with `Both`.
 
 ## Working with Causes
 
@@ -202,6 +202,24 @@ squash(cause); // "error" (failures take priority)
 ```
 
 ## Handling Causes in Practice
+
+### Pattern 0: Handle the Cause inside an Effect
+
+`foldCauseM` is like `foldM`, but gives access to the full `Cause` (including defects and interruptions),
+and `TIO.failCause` fails with a given `Cause`:
+
+```typescript
+const safe = riskyOperation.foldCauseM(
+    (cause) =>
+        isDie(cause)
+            ? TIO.succeed("fallback after a defect")
+            : TIO.failCause(cause), // propagate failures and interruptions untouched
+    (value) => TIO.succeed(value)
+);
+```
+
+Note that an interrupted fiber cannot recover from its interruption: in an interruptible region, it keeps
+being interrupted whatever the handler returns (finalizers still run).
 
 ### Pattern 1: Inspect Exit Value
 
@@ -322,6 +340,7 @@ runtime.unsafeRun(program).then((exit) => {
 | `isFailure(cause)` | Check for failures |
 | `isDie(cause)` | Check for defects |
 | `isInterrupted(cause)` | Check for interruption |
+| `isInterruptedOnly(cause)` | Check for interruption only (no failures nor defects) |
 | `prettyPrint(cause)` | Human-readable string |
 | `squash(cause)` | Get most important error |
 

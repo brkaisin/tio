@@ -112,6 +112,17 @@ const program = TIO.succeed(42)
     .flatMap((fiber) => TIO.joinFiber(fiber));
 ```
 
+Fibers can be interrupted: their pending async operations are cancelled and their finalizers run:
+
+```typescript
+const program = TIO.sleep(10_000)
+    .ensuring(log("cleaning up"))
+    .fork()
+    .flatMap((fiber) => TIO.interruptFiber(fiber)); // logs "cleaning up" right away
+
+const winner = TIO.race(fast, slow); // the loser is interrupted
+```
+
 ### Rich Error Information
 
 Causes capture the complete failure story:

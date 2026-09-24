@@ -38,13 +38,15 @@ JavaScript Thread
 
 ## How Fibers Work
 
-When you call `.fork()` on an effect, TIO:
+Every TIO program runs in a fiber: `runtime.unsafeRun(effect)` starts a root fiber. A fiber interprets the effect
+step by step, keeping an explicit stack of continuations (so deeply nested `flatMap`s are stack-safe). It:
 
-1. Creates a new `FiberContext` to track the fiber's state
-2. Schedules the effect to run asynchronously via `queueMicrotask()`
-3. Returns immediately with a `Fiber` handle
+- runs synchronous steps one after the other,
+- suspends when waiting on an async operation (a timer, a Promise, another fiber...), letting other fibers run,
+- yields to the event loop every few thousand steps, so that a CPU-bound fiber doesn't starve the others.
 
-The forked effect runs independently. You can:
+When you call `.fork()` on an effect, TIO creates a new fiber that starts running the effect concurrently,
+and returns immediately with a `Fiber` handle. You can:
 - **Join** it: wait for its result
 - **Await** it: wait for its exit value (success or failure)
 - **Interrupt** it: cancel its execution
@@ -122,8 +124,8 @@ A fiber can be in one of three states:
 
 | State | Description |
 |-------|-------------|
-| `Running` | The fiber is currently executing |
-| `Suspended` | The fiber is waiting (e.g., for I/O or a timer) |
+| `Running` | The fiber is executing (or about to start) |
+| `Suspended` | The fiber is waiting on an async operation (e.g., I/O or a timer) |
 | `Done` | The fiber has completed with a `FiberExit` |
 
 You can check a fiber's status:
@@ -197,30 +199,31 @@ const exit = await runtime.unsafeRun(program);
 
 ### How Interruption Works
 
-Interruption in TIO is **cooperative**. When you call `fiber.unsafeInterrupt()`:
+`TIO.interruptFiber(fiber)` requests the interruption of the fiber, then waits for it to complete.
 
-1. The fiber is marked as interrupted
-2. At the next **async boundary** (await point), the fiber checks if it should stop
-3. If interrupted, the fiber completes with a `Cause.Interrupt`
+1. The fiber is marked as interrupted.
+2. If it is suspended on an async operation, the operation is cancelled (e.g. the timer of `TIO.sleep` is cleared)
+   and the fiber resumes immediately. Otherwise, the interruption is picked up before its next step.
+3. The fiber unwinds its stack, running all its finalizers (see below), and completes with an `Interrupt` cause.
+4. `interruptFiber` returns the exit of the fiber, once all its finalizers are done.
 
 ```
 Fiber execution:
-──► sync code ──► await ──► sync code ──► await ──► sync code ──►
-                    ▲                       ▲
-                    │                       │
-            Interruption check      Interruption check
+──► step ──► step ──► async (suspended) ──► step ──►
+  ▲        ▲        ▲       ▲
+  └────────┴────────┴───────┴── interruption points
 ```
 
 This means:
-- **Synchronous code blocks** cannot be interrupted mid-execution
-- **Async operations** (delays, I/O) are natural interruption points
-- You can add explicit check points with `TIO.checkInterrupted`
+- A **single synchronous step** (e.g. a `TIO.make` callback) cannot be interrupted in the middle of its execution
+- Everything between steps, including async operations, is interruptible
+- An interrupted fiber cannot "recover": `foldM`, `orElse`, etc. do not catch interruptions
 
 ```typescript
-// This can be interrupted at the delay
+// This can be interrupted during the delay
 const interruptible = TIO.succeed(1).delay(1000);
 
-// This runs to completion even if interrupted (no async boundary)
+// This single step runs to completion even if interrupted
 const notInterruptible = TIO.make(() => {
     let sum = 0;
     for (let i = 0; i < 1000000; i++) sum += i;
@@ -228,29 +231,103 @@ const notInterruptible = TIO.make(() => {
 });
 ```
 
+### Finalizers
+
+Finalizers registered with `ensuring` always run: on success, on failure, and on interruption.
+Finalizers themselves are uninterruptible, so they run to completion.
+
+```typescript
+const program = acquireConnection.flatMap((conn) =>
+    useConnection(conn).ensuring(closeConnection(conn))
+);
+// closeConnection runs even if the fiber running `program` is interrupted
+```
+
+### Uninterruptible Regions
+
+Some sections must not be interrupted halfway. Mark them `uninterruptible()`: an interruption received in the region
+is deferred until the region is exited.
+
+```typescript
+const transfer = withdraw(from, amount)
+    .flatMap(() => deposit(to, amount))
+    .uninterruptible(); // either both happen, or none
+```
+
+`TIO.uninterruptibleMask` runs an effect uninterruptibly, while allowing some parts to be interrupted again with
+`restore`. This is how you can write safe resource handling, where acquisition and release are uninterruptible but
+the usage is interruptible:
+
+```typescript
+const bracket = <R, E, A, B>(
+    acquire: TIO<R, E, A>,
+    release: (a: A) => TIO<R, never, unknown>,
+    use: (a: A) => TIO<R, E, B>
+): TIO<R, E, B> =>
+    TIO.uninterruptibleMask((restore) => acquire.flatMap((a) => restore(use(a)).ensuring(release(a))));
+```
+
+Forked fibers always start interruptible, even when forked from an uninterruptible region.
+
+### Cancellable Async Operations
+
+`TIO.async` can return a *canceler*, called when the fiber is interrupted while waiting for the operation.
+Use it to release what the operation holds:
+
+```typescript
+const fetchWithAbort = (url: string) =>
+    TIO.async<unknown, Error, Response>((_, resolve, reject) => {
+        const controller = new AbortController();
+        fetch(url, { signal: controller.signal }).then(resolve, reject);
+        return () => controller.abort();
+    });
+```
+
+Without a canceler, the interrupted fiber still stops waiting immediately; the result of the operation is ignored.
+
+### Interrupting from Outside
+
+`runtime.unsafeRunFiber(effect)` starts the effect and returns its root fiber. This is useful to cancel a whole
+program, for example on shutdown:
+
+```typescript
+const fiber = runtime.unsafeRunFiber(server);
+process.on("SIGINT", () => fiber.unsafeInterrupt());
+```
+
+When the root fiber of `unsafeRun`, `safeRunEither`, etc. is interrupted, the returned Promise is rejected with
+an `InterruptedException`.
+
 ## Racing with Automatic Cancellation
 
-`TIO.raceFirst` runs multiple effects concurrently and returns the first to complete, **automatically interrupting the losers**:
+`TIO.race` (or `effect.race(...)`) runs multiple effects concurrently and returns the first to complete
+(successfully or not), **automatically interrupting the losers**:
 
 ```typescript
 const fast = TIO.succeed("fast").delay(50);
 const slow = TIO.succeed("slow").delay(200);
 
-const winner = await runtime.unsafeRun(TIO.raceFirst(fast, slow));
+const winner = await runtime.unsafeRun(TIO.race(fast, slow));
 // winner === "fast"
-// The "slow" fiber is automatically interrupted
+// The "slow" fiber is interrupted, and its finalizers have run
 ```
+
+If the racing fiber is itself interrupted, all the racers are interrupted too.
+
+`TIO.all` is the counterpart of `race`: it runs effects concurrently and collects all their results.
+If one of them fails, the others are interrupted.
 
 ### Implementing Timeouts
 
-Racing is perfect for implementing timeouts:
+Racing is perfect for implementing timeouts. `effect.timeout(ms)` returns `null` if the effect doesn't complete in
+time (the effect is then interrupted). You can also use `race` directly to fail instead:
 
 ```typescript
 function withTimeout<R, E, A>(
     effect: TIO<R, E, A>, 
     ms: number
 ): TIO<R, E | "timeout", A> {
-    return TIO.raceFirst(
+    return TIO.race<R, E | "timeout", A>(
         effect,
         TIO.sleep(ms).flatMap(() => TIO.fail("timeout" as const))
     );
@@ -305,7 +382,7 @@ const fetchRecommendations = TIO.succeed(["item1", "item2"]).delay(80);
 const fetchDashboardData = fetchUser.fork().flatMap((userFiber) =>
     fetchOrders.fork().flatMap((ordersFiber) =>
         fetchRecommendations.fork().flatMap((recsFiber) => {
-            return TIO.raceFirst(
+            return TIO.race(
                 // Wait for all to complete
                 TIO.joinFiber(userFiber).flatMap((user) =>
                     TIO.joinFiber(ordersFiber).flatMap((orders) =>
@@ -341,9 +418,16 @@ runtime.safeRunEither(fetchDashboardData).then((result) => {
 | `TIO.forkAll(effects)` | Fork multiple effects |
 | `TIO.joinFiber(fiber)` | Wait for result, propagate errors |
 | `TIO.awaitFiber(fiber)` | Wait for exit value |
-| `TIO.interruptFiber(fiber)` | Cancel and wait for exit |
+| `TIO.interruptFiber(fiber)` | Interrupt and wait for exit |
+| `TIO.interruptAll(fibers)` | Interrupt all and wait for their exits |
 | `TIO.fiberStatus(fiber)` | Get current status |
-| `TIO.raceFirst(...effects)` | Race with auto-cancellation |
+| `TIO.race(...effects)` | Race with auto-cancellation of the losers |
+| `TIO.all(...effects)` | Run concurrently, fail fast and interrupt the others |
+| `effect.timeout(ms)` | Interrupt the effect after `ms` |
+| `effect.ensuring(finalizer)` | Run a finalizer, even on interruption |
+| `effect.uninterruptible()` | Defer interruptions until the effect is done |
+| `TIO.uninterruptibleMask(f)` | Uninterruptible, with interruptible parts |
+| `runtime.unsafeRunFiber(effect)` | Run and get the root fiber |
 
 ## Next Steps
 

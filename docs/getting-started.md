@@ -4,8 +4,13 @@ This guide will help you get up and running with TIO quickly.
 
 ## Installation
 
+TIO is not published on npm yet. For now, clone the repository and build it:
+
 ```bash
-npm install tio
+git clone https://github.com/brkaisin/tio.git
+cd tio
+npm install
+npx tsc
 ```
 
 ## Basic Concepts

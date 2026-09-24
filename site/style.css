@@ -214,6 +214,7 @@ a:hover {
 
 .layout {
     padding-top: var(--topbar-height);
+    padding-left: var(--sidebar-width);
 }
 
 .sidebar {
@@ -287,7 +288,7 @@ a:hover {
 }
 
 .content {
-    margin-left: var(--sidebar-width);
+    margin: 0 auto;
     max-width: 972px;
     padding: 16px 56px 48px;
 }
@@ -501,8 +502,11 @@ footer {
         box-shadow: 0 0 40px rgba(0, 0, 0, 0.25);
     }
 
+    .layout {
+        padding-left: 0;
+    }
+
     .content {
-        margin-left: 0;
         padding: 8px 16px 40px;
     }
 

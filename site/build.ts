@@ -1,7 +1,8 @@
 // Builds the documentation website: a single page with a sidebar, generated from README.md and docs/*.md.
 // Usage: node site/build.ts [outDir]   (default outDir: site/out)
 
-import { readFileSync, writeFileSync, mkdirSync, copyFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Marked, Renderer, type Tokens } from "marked";
@@ -144,22 +145,29 @@ const sidebar = toc
     )
     .join("\n");
 
-const page = readFileSync(join(siteDir, "template.html"), "utf8")
-    .replaceAll("{{version}}", pkg.version)
-    .replaceAll("{{description}}", escapeHtml(pkg.description))
-    .replaceAll("{{repository}}", pkg.repository.url)
-    .replace("{{sidebar}}", () => sidebar)
-    .replace("{{content}}", () => content);
-
 // the browser script is written in TypeScript too
 const script = ts.transpileModule(readFileSync(join(siteDir, "script.ts"), "utf8"), {
     compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None, removeComments: true }
 }).outputText;
 
+const style = readFileSync(join(siteDir, "style.css"), "utf8");
+
+// assets are cached by the browser, the hash in their url makes sure a new version is loaded after a deploy
+const hash = (s: string): string => createHash("sha256").update(s).digest("hex").slice(0, 10);
+
+const page = readFileSync(join(siteDir, "template.html"), "utf8")
+    .replaceAll("{{version}}", pkg.version)
+    .replaceAll("{{description}}", escapeHtml(pkg.description))
+    .replaceAll("{{repository}}", pkg.repository.url)
+    .replace("{{sidebar}}", () => sidebar)
+    .replace("{{content}}", () => content)
+    .replace("{{styleHash}}", hash(style))
+    .replace("{{scriptHash}}", hash(script));
+
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, "index.html"), page);
 writeFileSync(join(outDir, "script.js"), script);
-copyFileSync(join(siteDir, "style.css"), join(outDir, "style.css"));
+writeFileSync(join(outDir, "style.css"), style);
 writeFileSync(join(outDir, ".nojekyll"), "");
 
 console.log(`Documentation website built in ${outDir}`);

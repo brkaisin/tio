@@ -48,6 +48,20 @@ export type TIOOp<R, E, A> =
 /** Restores the interruptibility of the enclosing region, see `TIO.uninterruptibleMask`. */
 export type Restore = <R, E, A>(tio: TIO<R, E, A>) => TIO<R, E, A>;
 
+type UnionToIntersection<U> = (U extends unknown ? (u: U) => void : never) extends (i: infer I) => void ? I : never;
+
+/**
+ * The environment required by a `TIO.gen` block: the intersection of the environments of all yielded effects.
+ * `any` (e.g. from `IO`) and `unknown` environments require nothing: they are left out, so they don't erase
+ * the others.
+ */
+export type GenR<Eff> = UnionToIntersection<
+    Eff extends TIO<infer R, any, any> ? (unknown extends R ? never : R) : never
+>;
+
+/** The errors of a `TIO.gen` block: the union of the errors of all yielded effects. */
+export type GenE<Eff> = Eff extends TIO<any, infer E, any> ? E : never;
+
 /**
  * TIO is a purely functional effect type that describes effectful computations.
  *
@@ -285,6 +299,42 @@ export class TIO<in R, out E, out A> {
 
     private setInterruptible(interruptible: boolean): TIO<R, E, A> {
         return new TIO<R, E, A>({ _tag: TIOOpTag.SetInterruptible, interruptible, run: () => this });
+    }
+
+    /** Makes `yield*` usable on a TIO inside `TIO.gen`, evaluating to its success value. */
+    *[Symbol.iterator](): Generator<TIO<R, E, A>, A, any> {
+        return yield this;
+    }
+
+    /**
+     * Writes effects in an imperative style, like async/await: inside the generator, `yield*` runs an
+     * effect and evaluates to its success value. The first failure short-circuits the rest of the block.
+     * The environment and error types are inferred from all the yielded effects.
+     *
+     * The generator is started each time the effect runs, so the resulting TIO can be run, retried or
+     * raced any number of times. Typed failures cannot be caught with try/catch inside the generator:
+     * use TIO combinators (`orElse`, `foldM`, ...) on the yielded effect instead.
+     *
+     * @example
+     * ```ts
+     * const program = TIO.gen(function* () {
+     *     const user = yield* fetchUser(id);
+     *     const orders = yield* fetchOrders(user);
+     *     return `${user.name}: ${orders.length} orders`;
+     * });
+     * ```
+     */
+    static gen<Eff extends TIO<any, any, any>, A>(f: () => Generator<Eff, A, any>): TIO<GenR<Eff>, GenE<Eff>, A> {
+        return TIO.flatten(
+            TIO.make(() => {
+                const iterator = f();
+                const step = (input: unknown): TIO<any, any, A> => {
+                    const next = iterator.next(input);
+                    return next.done ? TIO.succeed(next.value) : next.value.flatMap(step);
+                };
+                return step(undefined);
+            })
+        );
     }
 
     /** Creates an effect from a synchronous function that uses the environment. */

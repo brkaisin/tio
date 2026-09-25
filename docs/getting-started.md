@@ -99,6 +99,35 @@ const mapped = TIO.fail("error")
 // Error: Error("error")
 ```
 
+## Generators (async/await style)
+
+Chaining many `flatMap`s quickly becomes nested, especially when a later step needs a value from an earlier one.
+`TIO.gen` lets you write the same thing sequentially: inside the generator, `yield*` runs an effect and
+evaluates to its success value, just like `await` does for a Promise.
+
+```typescript
+const summary = (input: string) =>
+    TIO.gen(function* () {
+        const id = yield* parseId(input);        // TIO<void, "invalid id", number>
+        const user = yield* fetchUser(id);       // TIO<void, "user not found", User>
+        const orders = yield* fetchOrders(user); // TIO<void, "network error", Order[]>
+
+        if (orders.length === 0) {
+            return yield* TIO.fail("no orders" as const);
+        }
+        return `${user.name}: ${orders.length} orders`;
+    });
+// TIO<void, "invalid id" | "user not found" | "network error" | "no orders", string>
+```
+
+- The first failure short-circuits the rest of the block.
+- The error type is the union of the errors of all the yielded effects, and the environment is the
+  intersection of their environments: nothing to annotate.
+- The block is lazy like any other effect: the generator starts each time the effect runs, so it can be
+  run, retried or raced any number of times.
+- Typed failures are not thrown, so `try/catch` inside the generator won't catch them: use combinators on the
+  yielded effect instead, e.g. `yield* fetchUser(id).orElse(TIO.succeed(guest))`.
+
 ## Handling Errors
 
 ### OrElse (fallback on error)

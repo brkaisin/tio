@@ -91,6 +91,18 @@ const divide = (a: number, b: number): TIO<void, "division by zero", number> =>
     b === 0 ? TIO.fail("division by zero") : TIO.succeed(a / b);
 ```
 
+### Generators
+
+Write effects sequentially, like async/await, while keeping typed errors:
+
+```typescript
+const program = TIO.gen(function* () {
+    const user = yield* fetchUser(id);       // fails with "user not found"
+    const orders = yield* fetchOrders(user); // fails with "network error"
+    return `${user.name}: ${orders.length} orders`;
+}); // TIO<void, "user not found" | "network error", string>
+```
+
 ### Dependency Injection
 
 Dependencies are type-checked at compile time:

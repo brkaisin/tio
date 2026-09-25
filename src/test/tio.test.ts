@@ -1,4 +1,4 @@
-import { assert, describe, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { TIO } from "../tio/tio";
 import { left, right } from "../tio/util/either";
 import { Runtime } from "../tio/runtime";
@@ -128,8 +128,8 @@ describe("TIO", () => {
 
         it("absolve", async () => {
             assert.equal(await runtime.unsafeRun(TIO.succeed(right("success")).absolve()), "success");
-            // todo: the following test should also pass with unsafeRun, but runs infinitely...
             assert.deepEqual(await runtime.safeRunEither(TIO.succeed(left("error")).absolve()), left("error"));
+            await expect(runtime.unsafeRun(TIO.succeed(left("error")).absolve())).rejects.toBe("error");
         });
 
         it("augmentError", async () => {
